@@ -321,10 +321,17 @@ async function handleFile(file) {
     showProc('Enviando comprobante a Claude...');
 
     try {
-      const formData = new FormData();
-      formData.append('image', file);
+const reader2 = new FileReader();
+const base64 = await new Promise(resolve => {
+  reader2.onload = e => resolve(e.target.result.split(',')[1]);
+  reader2.readAsDataURL(file);
+});
 
-      const resp = await fetch('/api/process', { method:'POST', body: formData });
+const resp = await fetch('/api/process', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ image: base64, mimeType: file.type })
+});
       const data = await resp.json();
 
       if(!data.success) throw new Error(data.error||'Error desconocido');
