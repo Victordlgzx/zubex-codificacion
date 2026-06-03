@@ -1,44 +1,48 @@
-export const config = { runtime: "edge" };
- 
-export default async function handler(req) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return res.status(405).json({ error: "Method not allowed" });
   }
- 
+
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_KEY) {
-    return new Response(JSON.stringify({ error: "API key no configurada" }), {
-      status: 500, headers: { "Content-Type": "application/json" }
-    });
+    return res.status(500).json({ error: "API key no configurada" });
   }
- 
+
   try {
-    const formData = await req.formData();
-    const imageFile = formData.get("image");
-    if (!imageFile) {
-      return new Response(JSON.stringify({ error: "No se recibió imagen" }), {
-        status: 400, headers: { "Content-Type": "application/json" }
-      });
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+    const boundary = req.headers["content-type"].split("boundary=")[1];
+    const parts = buffer.toString("binary").split("--" + boundary);
+    
+    let base64 = "";
+    let mimeType = "image/jpeg";
+    
+    for (const part of parts) {
+      if (part.includes("Content-Disposition") && part.includes('name="image"')) {
+        const match = part.match(/Content-Type: ([^\r\n]+)/);
+        if (match) mimeType = match[1].trim();
+        const bodyStart = part.indexOf("\r\n\r\n") + 4;
+        const bodyEnd = part.lastIndexOf("\r\n");
+        const binary = part.substring(bodyStart, bodyEnd);
+        base64 = Buffer.from(binary, "binary").toString("base64");
+      }
     }
- 
-    const arrayBuffer = await imageFile.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-    const mimeType = imageFile.type || "image/jpeg";
- 
+
+    if (!base64) return res.status(400).json({ error: "No se recibió imagen" });
+
     const prompt = `Eres el asistente de codificación de Zubex para el área de CORRUGADO.
 Analiza este comprobante y extrae ÚNICAMENTE estos datos:
- 
-REGLAS ESTRICTAS:
 - id: número después de "# Solicitud (ID):" (formato C-XXXX)
-- tipo: "nuevo" si dice "Tipo de solicitud: Nuevo", "modificacion" si dice "Modificación"
-- Si NUEVO: toma Ancho en MM y Largo en MTS directamente del comprobante
-- Si MODIFICACIÓN: el campo "Código a modificar" tiene formato CÓDIGO seguido de DESCRIPCIÓN. Las medidas están AL FINAL de la descripción separadas por guión. Ejemplos: "BCO-5.25X50M" = ancho 5.25, largo 50. "NIA-BCO-8.5X100M" = ancho 8.5, largo 100. "BCO-195X95M" = ancho 195, largo 95.
-- ancho_mm: solo el número (puede ser MM o pulgadas como 5.25, 8.5, 11)
+- tipo: "nuevo" o "modificacion"
+- Si NUEVO: toma Ancho en MM y Largo en MTS directamente
+- Si MODIFICACIÓN: las medidas están AL FINAL de la descripción del código (ej: BCO-5.25X50M = ancho 5.25, largo 50)
+- ancho_mm: solo el número
 - largo_mts: solo el número en metros
- 
-Responde ÚNICAMENTE con JSON válido sin ningún texto adicional:
-{"id":"C-XXXX","tipo":"nuevo","ancho_mm":195,"largo_mts":95,"notas":"breve explicación"}`;
- 
+
+Responde ÚNICAMENTE con JSON válido:
+{"id":"C-XXXX","tipo":"nuevo","ancho_mm":195,"largo_mts":95,"notas":"explicación breve"}`;
+
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -58,18 +62,15 @@ Responde ÚNICAMENTE con JSON válido sin ningún texto adicional:
         }]
       })
     });
- 
+
     const data = await resp.json();
     const raw = data.content?.map(c => c.text || "").join("").trim();
     const clean = raw.replace(/```json|```/g, "").trim();
     const extracted = JSON.parse(clean);
- 
-    return new Response(JSON.stringify({ success: true, extracted }), {
-      headers: { "Content-Type": "application/json" }
-    });
+
+    return res.status(200).json({ success: true, extracted });
   } catch(err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500, headers: { "Content-Type": "application/json" }
-    });
+    return res.status(500).json({ error: err.message });
   }
+}
 }
