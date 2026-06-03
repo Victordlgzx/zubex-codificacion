@@ -38,9 +38,15 @@ Responde ÚNICAMENTE con JSON:
     });
 
     const data = await resp.json();
-    const raw = data.content?.map(c => c.text || "").join("").trim();
-    const extracted = JSON.parse(raw.replace(/```json|```/g, "").trim());
-    return res.status(200).json({ success: true, extracted });
+if (data.error) return res.status(500).json({ error: data.error.message || JSON.stringify(data.error) });
+const raw = data.content?.map(c => c.text || "").join("").trim();
+if (!raw) return res.status(500).json({ error: "Claude no respondió", data });
+try {
+  const extracted = JSON.parse(raw.replace(/```json|```/g, "").trim());
+  return res.status(200).json({ success: true, extracted });
+} catch(e) {
+  return res.status(500).json({ error: "JSON inválido: " + raw });
+}
   } catch(e) {
     return res.status(500).json({ error: e.message });
   }
