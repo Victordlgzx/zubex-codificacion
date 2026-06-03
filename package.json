@@ -1,0 +1,7 @@
+{
+  "name": "zubex-codificacion",
+  "version": "1.0.0",
+  "dependencies": {
+    "formidable": "^3.5.1"
+  }
+}
