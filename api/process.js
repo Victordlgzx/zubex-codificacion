@@ -1,24 +1,18 @@
 export const config = { api: { bodyParser: { sizeLimit: '10mb' } } };
- 
+
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
- 
+
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: "API key no configurada" });
- 
+
   try {
-    const { image, mimeType } = req.body;
-    if (!image) return res.status(400).json({ error: "No se recibio imagen" });
- 
-    const prompt = `Analiza este comprobante Zubex. Responde UNICAMENTE con JSON puro sin markdown:
-{"id":"C-XXXX","ancho_mm":195,"largo_mts":95,"notas":"de donde obtuviste los datos"}
- 
-- id: numero despues de # Solicitud (ID):
-- Si dice Tipo de solicitud Nuevo: toma Ancho y Largo directamente
-- Si dice Modificacion: las medidas estan al final de la descripcion del codigo, formato NxM donde N=ancho M=largo`;
- 
+    const body = req.body;
+    const image = body && body.image;
+    const mimeType = (body && body.mimeType) || "image/jpeg";
+    
+    if (!image) return res.status(400).json({ error: "No imagen", body: JSON.stringify(body).substring(0,100) });
+
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -32,31 +26,24 @@ export default async function handler(req, res) {
         messages: [{
           role: "user",
           content: [
-            { type: "image", source: { type: "base64", media_type: mimeType || "image/jpeg", data: image } },
-            { type: "text", text: prompt }
+            { type: "image", source: { type: "base64", media_type: mimeType, data: image } },
+            { type: "text", text: 'Analiza este comprobante Zubex. Responde SOLO con JSON sin markdown:\n{"id":"C-XXXX","ancho_mm":195,"largo_mts":95,"notas":"explicacion"}\nReglas: id=numero despues de # Solicitud (ID). Si Nuevo: toma Ancho y Largo directo. Si Modificacion: medidas al final de descripcion del codigo formato NxM.' }
           ]
         }]
       })
     });
- 
+
     const claudeData = await resp.json();
-    
-    if (claudeData.error) return res.status(500).json({ error: claudeData.error.message || JSON.stringify(claudeData.error) });
- 
+    if (claudeData.error) return res.status(500).json({ error: claudeData.error.message, type: claudeData.error.type });
+
     const raw = (claudeData.content || []).map(c => c.text || "").join("").trim();
-    if (!raw) return res.status(500).json({ error: "Claude no respondio", debug: JSON.stringify(claudeData) });
- 
-    // Limpiar cualquier markdown
-    const clean = raw.replace(/```[\w]*\n?/g, "").replace(/```/g, "").trim();
-    
-    // Encontrar el JSON dentro del texto
-    const jsonMatch = clean.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return res.status(500).json({ error: "No se encontro JSON en: " + clean.substring(0,200) });
-    
-    const extracted = JSON.parse(jsonMatch[0]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return res.status(500).json({ error: "Sin JSON en respuesta", raw: raw.substring(0,300) });
+
+    const extracted = JSON.parse(match[0]);
     return res.status(200).json({ success: true, extracted });
- 
+
   } catch(e) {
-    return res.status(500).json({ error: e.message, stack: e.stack });
+    return res.status(500).json({ error: e.message });
   }
 }
