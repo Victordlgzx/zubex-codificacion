@@ -61,14 +61,13 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
 .flabel{font-size:11px;font-weight:500;color:var(--muted);margin-bottom:4px;display:flex;align-items:center;gap:4px;}
 .fnum{background:var(--blue);color:white;width:15px;height:15px;border-radius:3px;font-size:8px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}
 .fstatic{background:var(--light);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--muted);}
-.fval{background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:7px 10px;font-size:12px;color:var(--blue);font-weight:500;font-family:"DM Mono",monospace;}
-.fval.empty{background:var(--light);border-color:var(--border);color:var(--muted);font-style:italic;font-weight:400;font-family:"DM Sans",sans-serif;}
-.fval.editable{background:#fffbeb;border-color:#fde68a;color:#854d0e;font-family:"DM Mono",monospace;}
-input.fval-input{background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:7px 10px;font-size:12px;color:#854d0e;font-family:"DM Mono",monospace;width:100%;outline:none;}
-input.fval-input:focus{border-color:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11,0.15);}
+/* Todos los campos son inputs editables */
+.finput{width:100%;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:7px 10px;font-size:12px;color:var(--blue);font-weight:500;font-family:"DM Mono",monospace;outline:none;}
+.finput:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(26,47,107,0.1);}
+.finput.desarrollo{background:var(--light);border-color:var(--border);color:var(--muted);font-weight:400;font-family:"DM Sans",sans-serif;font-style:italic;}
+.finput.mp{background:#fffbeb;border-color:#fde68a;color:#854d0e;}
+.finput.mp:focus{border-color:#f59e0b;}
 .export-badge{background:#fef3ee;border:1px solid #fed7aa;border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:8px;font-size:12px;color:#c2410c;font-weight:500;}
-.mp-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
-.mp-label{font-size:11px;font-weight:500;color:var(--muted);min-width:80px;}
 .upload-zone{border:2px dashed #d1d5db;border-radius:12px;padding:2.5rem 1rem;text-align:center;cursor:pointer;background:#fafafa;}
 .upload-zone:hover{border-color:var(--blue);background:#eef2ff;}
 .upload-icon{font-size:36px;color:#9ca3af;margin-bottom:10px;}
@@ -157,7 +156,7 @@ input.fval-input:focus{border-color:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11
       </div>
       <div class="ai-box">
         <div class="ai-hd"><i class="ti ti-robot" style="font-size:15px;"></i>Claude — Asistente de codificacion Zubex</div>
-        <div class="ai-txt">Sube el comprobante y yo leo los datos, busco en la BD y lleno todos los campos automaticamente — incluyendo las materias primas.</div>
+        <div class="ai-txt">Sube el comprobante y yo leo los datos, busco en la BD y lleno todos los campos automaticamente — incluyendo las materias primas. Puedes editar cualquier campo antes de guardar.</div>
         <div style="margin-top:10px;"><button class="btn btn-primary" onclick="go('nueva')"><i class="ti ti-upload" style="font-size:12px;"></i>Subir comprobante</button></div>
       </div>
       <div class="card">
@@ -196,30 +195,35 @@ input.fval-input:focus{border-color:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11
             <div><div class="flabel"><span class="fnum">2</span>Objetivo</div><div class="fstatic">Seguimiento de solicitud comercial</div></div>
           </div>
 
+          <div id="export-badge" class="export-badge" style="display:none;">
+            <i class="ti ti-world" style="font-size:16px;"></i>
+            <span>Cliente de exportacion — materias primas abiertas para el coordinador</span>
+          </div>
+
           <div class="section-bar"><i class="ti ti-settings" style="font-size:12px;"></i>Produccion</div>
           <div class="form-grid">
-            <div class="fg-full"><div class="flabel"><span class="fnum">3</span>ID</div><div class="fval" id="r3">—</div></div>
-            <div><div class="flabel"><span class="fnum">4</span>Nivel de proceso</div><div class="fval" id="r4">Corrugado</div></div>
-            <div><div class="flabel"><span class="fnum">5</span>Piezas / Metros por caja</div><div class="fval" id="r5">—</div></div>
-            <div><div class="flabel"><span class="fnum">6</span>Kg por caja</div><div class="fval" id="r6">—</div></div>
-            <div><div class="flabel"><span class="fnum">7</span>Linea P1</div><div class="fval" id="r7">—</div></div>
-            <div><div class="flabel"><span class="fnum">8</span>Kg 24h P1</div><div class="fval" id="r8">—</div></div>
-            <div><div class="flabel"><span class="fnum">9</span>Linea P2</div><div class="fval" id="r9">—</div></div>
+            <div class="fg-full"><div class="flabel"><span class="fnum">3</span>ID</div><input class="finput" id="r3" placeholder="—"/></div>
+            <div><div class="flabel"><span class="fnum">4</span>Nivel de proceso</div><input class="finput" id="r4" value="Corrugado"/></div>
+            <div><div class="flabel"><span class="fnum">5</span>Piezas / Metros por caja</div><input class="finput" id="r5" placeholder="Desarrollo — definir con encargado"/></div>
+            <div><div class="flabel"><span class="fnum">6</span>Kg por caja</div><input class="finput" id="r6" placeholder="Desarrollo — definir con encargado"/></div>
+            <div><div class="flabel"><span class="fnum">7</span>Linea P1</div><input class="finput" id="r7" placeholder="Desarrollo — definir con encargado"/></div>
+            <div><div class="flabel"><span class="fnum">8</span>Kg 24h P1</div><input class="finput" id="r8" placeholder="Desarrollo — definir con encargado"/></div>
+            <div><div class="flabel"><span class="fnum">9</span>Linea P2</div><input class="finput" id="r9" placeholder="Desarrollo — definir con encargado"/></div>
           </div>
 
           <div class="section-bar"><i class="ti ti-package" style="font-size:12px;"></i>Consumibles</div>
           <div class="form-grid">
-            <div class="fg-full"><div class="flabel"><span class="fnum">10</span>Codigo interno</div><div class="fval" id="r10">—</div></div>
+            <div class="fg-full"><div class="flabel"><span class="fnum">10</span>Codigo interno</div><input class="finput" id="r10" placeholder="Desarrollo — definir con encargado"/></div>
           </div>
 
-          <!-- MATERIAS PRIMAS -->
-          <div id="mp-section">
-            <div class="section-bar orange" style="margin-top:.5rem;"><i class="ti ti-flask" style="font-size:12px;"></i>Materias Primas</div>
-            <div id="mp-exportacion" class="export-badge" style="display:none;">
-              <i class="ti ti-world" style="font-size:16px;"></i>
-              <span>Cliente de exportacion — materias primas definidas por el coordinador</span>
-            </div>
-            <div id="mp-campos"></div>
+          <div class="section-bar orange" style="margin-top:.5rem;"><i class="ti ti-flask" style="font-size:12px;"></i>Materias Primas</div>
+          <div class="form-grid">
+            <div class="fg-full"><div class="flabel">Separador 1</div><input class="finput mp" id="mp1" placeholder="Codigo/cantidad/unidad — ej: 10-050602-04285-01/2/PZA"/></div>
+            <div class="fg-full"><div class="flabel">Separador 2</div><input class="finput mp" id="mp2" placeholder="Codigo/cantidad/unidad — ej: 10-050602-04286-01/3/PZA"/></div>
+            <div class="fg-full"><div class="flabel">Aceite</div><input class="finput mp" id="mp3" placeholder="Codigo/cantidad/unidad — ej: 10-030301-07003-01/1.2/KG"/></div>
+            <div class="fg-full"><div class="flabel">Bolsa</div><input class="finput mp" id="mp4" placeholder="Codigo/cantidad/unidad — ej: 10-030702-07077-01/0.012/MPZA"/></div>
+            <div class="fg-full"><div class="flabel">Malla</div><input class="finput mp" id="mp5" placeholder="Codigo/cantidad/unidad — ej: 10-030703-07514-01/12/MTS"/></div>
+            <div class="fg-full"><div class="flabel">Caja</div><input class="finput mp" id="mp6" placeholder="Codigo/cantidad/unidad — ej: 10-050602-04301-01/1/PZA"/></div>
           </div>
 
           <div class="debug-box" id="debug-box"></div>
@@ -250,6 +254,18 @@ input.fval-input:focus{border-color:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11
 <script>
 let sols = [];
 let curData = null;
+
+function setInput(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (val) {
+    el.value = val;
+    el.classList.remove('desarrollo');
+  } else {
+    el.value = '';
+    el.classList.add('desarrollo');
+  }
+}
 
 async function handleFile(file) {
   if (!file) return;
@@ -292,16 +308,12 @@ async function handleFile(file) {
     if (data.error) throw new Error(data.error);
     if (!data.success) throw new Error(JSON.stringify(data));
 
-    document.getElementById('proc-msg').textContent = 'Listo.';
-    await new Promise(r => setTimeout(r, 300));
-
     document.getElementById('proc-box').style.display = 'none';
     mostrarResultados(data);
 
   } catch(err) {
     document.getElementById('proc-box').style.display = 'none';
     document.getElementById('result-wrap').style.display = 'block';
-    document.getElementById('r3').textContent = 'ERROR';
     document.getElementById('debug-box').style.display = 'block';
     document.getElementById('debug-box').textContent = 'Error: ' + err.message;
   }
@@ -314,98 +326,71 @@ function mostrarResultados(data) {
   const mp = data.materiasPrimas;
   const esExp = data.esExportacion;
 
-  // Campos 1-10
-  document.getElementById('r3').textContent = ex.id || '—';
-  document.getElementById('r4').textContent = 'Corrugado';
+  // Badge exportacion
+  document.getElementById('export-badge').style.display = esExp ? 'flex' : 'none';
 
-  const set = (id, val) => {
-    const el = document.getElementById(id);
-    if (val) { el.textContent = val; el.className = 'fval'; }
-    else { el.textContent = 'Desarrollo — definir con encargado'; el.className = 'fval empty'; }
-  };
+  // Campos 1-10 — siempre se llenan, exportacion o no
+  setInput('r3', ex.id);
+  setInput('r4', 'Corrugado');
 
   if (bd) {
-    const metros = (bd.largo_mts ? bd.largo_mts * bd.piezas : bd.metros) || bd.metros;
-    set('r5', (bd.metros || metros).toLocaleString('es-MX') + ' METROS / ' + bd.piezas + ' Stick');
-    set('r6', bd.peso + ' kg');
-    set('r7', bd.linP1);
-    set('r8', bd.kg24h + ' kg');
-    set('r9', bd.linP2);
-    set('r10', bd.cab + ', ' + bd.tub + '"');
+    setInput('r5', bd.metros.toLocaleString('es-MX') + ' METROS / ' + bd.piezas + ' Stick');
+    setInput('r6', bd.peso + ' kg');
+    setInput('r7', bd.linP1);
+    setInput('r8', bd.kg24h + ' kg');
+    setInput('r9', bd.linP2);
+    setInput('r10', bd.cab + ', ' + bd.tub + '"');
   } else {
-    ['r5','r6','r7','r8','r9','r10'].forEach(id => set(id, null));
+    ['r5','r6','r7','r8','r9','r10'].forEach(id => setInput(id, ''));
   }
 
-  // Materias primas
-  const mpExp = document.getElementById('mp-exportacion');
-  const mpCampos = document.getElementById('mp-campos');
-
-  if (esExp) {
-    mpExp.style.display = 'flex';
-    mpCampos.innerHTML = renderMPEditables(['Separador 1','Separador 2','Aceite','Bolsa','Malla','Caja']);
-  } else if (mp && mp.length) {
-    mpExp.style.display = 'none';
-    mpCampos.innerHTML = renderMPLlenos(mp);
+  // Materias primas — si nacional y BD encontrada, llenar
+  if (!esExp && mp && mp.length) {
+    const ids = ['mp1','mp2','mp3','mp4','mp5','mp6'];
+    const labels = ['Separador 1','Separador 2','Aceite','Bolsa','Malla','Caja'];
+    ids.forEach(id => setInput(id, ''));
+    mp.forEach(m => {
+      const idx = labels.indexOf(m.campo);
+      if (idx >= 0) setInput(ids[idx], m.valor);
+    });
   } else {
-    mpExp.style.display = 'none';
-    mpCampos.innerHTML = renderMPEditables(['Separador 1','Separador 2','Aceite','Bolsa','Malla','Caja']);
+    // Exportacion o sin BD — dejar campos vacios para editar
+    ['mp1','mp2','mp3','mp4','mp5','mp6'].forEach(id => setInput(id, ''));
   }
 
   curData = data;
 }
 
-function renderMPLlenos(mp) {
-  return '<div class="form-grid">' + mp.map(m =>
-    `<div class="fg-full">
-      <div class="flabel">${m.campo}</div>
-      <div class="fval">${m.valor}</div>
-    </div>`
-  ).join('') + '</div>';
-}
-
-function renderMPEditables(campos) {
-  return '<div class="form-grid">' + campos.map(c =>
-    `<div class="fg-full">
-      <div class="flabel">${c}</div>
-      <input class="fval-input" id="mp-${c.replace(/ /g,'_')}" placeholder="Codigo/cantidad/unidad — ej: 10-050602-04285-01/2/PZA"/>
-    </div>`
-  ).join('') + '</div>';
-}
-
-function getMPValues(mp, esExp, campos) {
-  if (mp && !esExp) return mp;
-  const names = campos || ['Separador 1','Separador 2','Aceite','Bolsa','Malla','Caja'];
-  return names.map(c => ({
-    campo: c,
-    valor: document.getElementById('mp-' + c.replace(/ /g,'_'))?.value || ''
-  }));
-}
-
 function guardar() {
   if (!curData) return;
-  const { extracted: ex, bd, materiasPrimas: mp, esExportacion: esExp } = curData;
-  if (document.getElementById('r3').textContent === 'ERROR') {
-    toast('No se puede guardar — hay un error', true); return;
-  }
+  const id = document.getElementById('r3').value;
+  if (!id) { toast('El ID es obligatorio', true); return; }
 
-  const mpFinal = getMPValues(mp, esExp);
+  const mpFinal = [
+    { campo: 'Separador 1', valor: document.getElementById('mp1').value },
+    { campo: 'Separador 2', valor: document.getElementById('mp2').value },
+    { campo: 'Aceite',      valor: document.getElementById('mp3').value },
+    { campo: 'Bolsa',       valor: document.getElementById('mp4').value },
+    { campo: 'Malla',       valor: document.getElementById('mp5').value },
+    { campo: 'Caja',        valor: document.getElementById('mp6').value },
+  ].filter(m => m.valor);
 
   sols.push({
-    id: ex.id || '?',
+    id,
     proceso: 'Corrugado',
-    piezas: bd ? bd.metros + ' METROS / ' + bd.piezas + ' Stick' : 'Desarrollo',
-    kg: bd ? bd.peso + ' kg' : '—',
-    lp1: bd ? bd.linP1 : '—',
-    kgp1: bd ? bd.kg24h + ' kg' : '—',
-    lp2: bd ? bd.linP2 : '—',
-    cod: bd ? bd.cab + ', ' + bd.tub + '"' : '—',
-    exportacion: esExp,
+    piezas:  document.getElementById('r5').value || '—',
+    kg:      document.getElementById('r6').value || '—',
+    lp1:     document.getElementById('r7').value || '—',
+    kgp1:    document.getElementById('r8').value || '—',
+    lp2:     document.getElementById('r9').value || '—',
+    cod:     document.getElementById('r10').value || '—',
+    exportacion: curData.esExportacion,
     mp: mpFinal,
     fecha: new Date().toLocaleDateString('es-MX'),
     estado: 'Completado'
   });
 
-  toast('Solicitud ' + (ex.id || '?') + ' guardada en ERP');
+  toast('Solicitud ' + id + ' guardada en ERP');
   resetForm();
   setTimeout(() => go('erp'), 700);
 }
@@ -482,18 +467,20 @@ function renderERP() {
       ${s.mp && s.mp.length ? `
       <div class="erp-mp">
         <div class="erp-mp-title">Materias Primas</div>
-        ${s.mp.filter(m => m.valor).map(m => `<div class="erp-mp-item">${m.campo}: ${m.valor}</div>`).join('')}
+        ${s.mp.map(m => `<div class="erp-mp-item">${m.campo}: ${m.valor}</div>`).join('')}
       </div>` : ''}
     </div>`).join('');
 }
 
 function exportCSV() {
   if (!sols.length) { toast('No hay datos', true); return; }
-  const h = ['ID','Proceso','Piezas/caja','Kg/caja','Linea P1','Kg 24h','Linea P2','Cod interno','Exportacion','MP1','MP2','MP3','MP4','MP5','MP6','Estado','Fecha'];
+  const h = ['ID','Proceso','Piezas/caja','Kg/caja','Linea P1','Kg 24h','Linea P2','Cod interno','Exportacion','Separador 1','Separador 2','Aceite','Bolsa','Malla','Caja','Estado','Fecha'];
+  const getMp = (sol, campo) => (sol.mp || []).find(m => m.campo===campo)?.valor || '';
   const rows = sols.map(s => [
     s.id, s.proceso, s.piezas, s.kg, s.lp1, s.kgp1, s.lp2, s.cod,
     s.exportacion ? 'Si' : 'No',
-    ...(s.mp || []).slice(0,6).map(m => m.valor || ''),
+    getMp(s,'Separador 1'), getMp(s,'Separador 2'), getMp(s,'Aceite'),
+    getMp(s,'Bolsa'), getMp(s,'Malla'), getMp(s,'Caja'),
     s.estado, s.fecha
   ]);
   const csv = [h, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
