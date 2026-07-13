@@ -7,15 +7,11 @@ function buscarBD(anchoRaw, largo) {
   const a = parseFloat(anchoRaw);
   if (isNaN(a) || isNaN(l)) return null;
 
-  // Buscar con valor directo y con conversion a la otra unidad
-  const aMM  = a > 30 ? a : a * 25.4;
-  const aPUL = a > 30 ? a / 25.4 : a;
-
   const buscar = (anchoTarget, tol) =>
     BD.filter(r => Math.abs(r[0]-anchoTarget)<=tol && Math.abs(r[1]-l)<=2 && r[2]>0);
 
   const matchesDirecto = buscar(a, a > 30 ? 2 : 0.5);
-  const matchesConvert = buscar(a > 30 ? aPUL : aMM, a > 30 ? 0.5 : 2);
+  const matchesConvert = buscar(a > 30 ? a/25.4 : a*25.4, a > 30 ? 0.5 : 2);
   const matches = matchesDirecto.length >= matchesConvert.length ? matchesDirecto : matchesConvert;
   if (!matches.length) return null;
 
@@ -38,7 +34,6 @@ function buscarBD(anchoRaw, largo) {
   const metros = l * piezas;
   const kg24h  = 3 * 21 * peso;
   const cabFmt = cab.charAt(0)+cab.slice(1).toLowerCase();
-  // Guardar anchoMM para materias primas
   const anchoMM = a > 30 ? a : a * 25.4;
 
   return { piezas, peso, linP1, linP2, metros, kg24h, cab:cabFmt, tub, tipoCaja, anchoMM };
@@ -49,39 +44,33 @@ function calcularMateriasPrimas(anchoMM, piezas, tipoCaja, esExportacion) {
   const mp = [];
   const esChorizo = anchoMM >= 48 && anchoMM <= 101;
 
+  // ── SEPARADORES ─────────────────────────────────────────────────────────
   if (!esChorizo) {
     const tc = tipoCaja || "";
     const t6=tc.includes("6"), t12=tc.includes("12"), t9=tc.includes("9"), t16=tc.includes("16");
-    if (t6 && t12) {
-      if (piezas <= 6) {
-        mp.push({campo:"Separador 1",valor:"10-050602-04282-01/1/PZA"});
-        mp.push({campo:"Separador 2",valor:"10-050602-04283-01/2/PZA"});
-      } else {
-        mp.push({campo:"Separador 1",valor:"10-050602-04285-01/2/PZA"});
-        mp.push({campo:"Separador 2",valor:"10-050602-04286-01/3/PZA"});
-      }
-    } else if (t9 && t16) {
-      if (piezas <= 9) {
-        mp.push({campo:"Separador 1",valor:"10-050602-04286-01/4/PZA"});
-      } else {
-        mp.push({campo:"Separador 1",valor:"10-050602-04284-01/6/PZA"});
-      }
-    } else if (t6) {
+
+    if (piezas === 6) {
       mp.push({campo:"Separador 1",valor:"10-050602-04282-01/1/PZA"});
       mp.push({campo:"Separador 2",valor:"10-050602-04283-01/2/PZA"});
-    } else if (t12) {
+    } else if (piezas === 12) {
       mp.push({campo:"Separador 1",valor:"10-050602-04285-01/2/PZA"});
       mp.push({campo:"Separador 2",valor:"10-050602-04286-01/3/PZA"});
-    } else if (t9) {
+    } else if (piezas === 9) {
       mp.push({campo:"Separador 1",valor:"10-050602-04286-01/4/PZA"});
-    } else if (t16) {
+    } else if (piezas === 16 || piezas === 20 || piezas === 40 || piezas === 49) {
+      // 16, 20, 40 y 49 sticks usan el mismo separador
       mp.push({campo:"Separador 1",valor:"10-050602-04284-01/6/PZA"});
+    } else {
+      // Caso no definido — dejar vacio para que el encargado llene
+      mp.push({campo:"Separador 1",valor:""});
     }
   }
 
+  // ── ACEITE ──────────────────────────────────────────────────────────────
   const factorAceite = esChorizo ? 0.06 : 0.100;
   mp.push({campo:"Aceite",valor:"10-030301-07003-01/"+parseFloat((piezas*factorAceite).toFixed(3))+"/KG"});
 
+  // ── BOLSA ───────────────────────────────────────────────────────────────
   const cantBolsa = parseFloat((piezas/1000).toFixed(3));
   if (anchoMM <= 269) {
     mp.push({campo:"Bolsa",valor:"10-030702-07077-01/"+cantBolsa+"/MPZA"});
@@ -89,6 +78,7 @@ function calcularMateriasPrimas(anchoMM, piezas, tipoCaja, esExportacion) {
     mp.push({campo:"Bolsa",valor:"10-030702-13041-01/"+cantBolsa+"/MPZA"});
   }
 
+  // ── MALLA ───────────────────────────────────────────────────────────────
   if (anchoMM >= 48 && anchoMM <= 60) {
     mp.push({campo:"Malla",valor:"10-030703-06863-01/"+parseFloat((piezas*0.5).toFixed(1))+"/MTS"});
   } else if (anchoMM >= 61 && anchoMM <= 249) {
@@ -97,15 +87,13 @@ function calcularMateriasPrimas(anchoMM, piezas, tipoCaja, esExportacion) {
     mp.push({campo:"Malla",valor:"10-030703-06864-01/"+piezas+"/MTS"});
   }
 
+  // ── CAJA ────────────────────────────────────────────────────────────────
   if (esChorizo) {
     mp.push({campo:"Caja",valor:"10-050602-12909-01/1/PZA"});
+  } else if (piezas === 9 || piezas === 16 || piezas === 20 || piezas === 40 || piezas === 49) {
+    mp.push({campo:"Caja",valor:"10-050602-04298-01/1/PZA"});
   } else {
-    const tc = tipoCaja || "";
-    if (tc.includes("9") || tc.includes("16")) {
-      mp.push({campo:"Caja",valor:"10-050602-04298-01/1/PZA"});
-    } else {
-      mp.push({campo:"Caja",valor:"10-050602-04301-01/1/PZA"});
-    }
+    mp.push({campo:"Caja",valor:"10-050602-04301-01/1/PZA"});
   }
 
   return mp;
@@ -126,7 +114,7 @@ export default async function handler(req, res) {
 Reglas:
 - id: numero despues de # Solicitud (ID):
 - tipo: nuevo o modificacion
-- Si NUEVO: ancho_raw es el numero del campo Ancho (sin unidad), ancho_unidad es "pulgadas" o "mm" segun como aparezca en el comprobante. largo_mts es el numero del campo Largo en metros.
+- Si NUEVO: ancho_raw es el numero del campo Ancho sin unidad, ancho_unidad es "pulgadas" o "mm" segun como aparezca. largo_mts es el numero del campo Largo en metros.
 - Si MODIFICACION: medidas al final de la descripcion del codigo. Si el numero es menor a 30 son pulgadas, si es mayor son mm.
 - asesor: nombre completo exacto del campo Asesor`;
 
