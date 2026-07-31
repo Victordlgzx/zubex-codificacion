@@ -44,11 +44,9 @@ function calcularMateriasPrimas(anchoMM, piezas, tipoCaja, esExportacion) {
   const mp = [];
   const esChorizo = anchoMM >= 48 && anchoMM <= 101;
 
-  // ── SEPARADORES ─────────────────────────────────────────────────────────
   if (!esChorizo) {
     const tc = tipoCaja || "";
     const t6=tc.includes("6"), t12=tc.includes("12"), t9=tc.includes("9"), t16=tc.includes("16");
-
     if (piezas === 6) {
       mp.push({campo:"Separador 1",valor:"10-050602-04282-01/1/PZA"});
       mp.push({campo:"Separador 2",valor:"10-050602-04283-01/2/PZA"});
@@ -58,19 +56,15 @@ function calcularMateriasPrimas(anchoMM, piezas, tipoCaja, esExportacion) {
     } else if (piezas === 9) {
       mp.push({campo:"Separador 1",valor:"10-050602-04286-01/4/PZA"});
     } else if (piezas === 16 || piezas === 20 || piezas === 40 || piezas === 49) {
-      // 16, 20, 40 y 49 sticks usan el mismo separador
       mp.push({campo:"Separador 1",valor:"10-050602-04284-01/6/PZA"});
     } else {
-      // Caso no definido — dejar vacio para que el encargado llene
       mp.push({campo:"Separador 1",valor:""});
     }
   }
 
-  // ── ACEITE ──────────────────────────────────────────────────────────────
   const factorAceite = esChorizo ? 0.06 : 0.100;
   mp.push({campo:"Aceite",valor:"10-030301-07003-01/"+parseFloat((piezas*factorAceite).toFixed(3))+"/KG"});
 
-  // ── BOLSA ───────────────────────────────────────────────────────────────
   const cantBolsa = parseFloat((piezas/1000).toFixed(3));
   if (anchoMM <= 269) {
     mp.push({campo:"Bolsa",valor:"10-030702-07077-01/"+cantBolsa+"/MPZA"});
@@ -78,7 +72,6 @@ function calcularMateriasPrimas(anchoMM, piezas, tipoCaja, esExportacion) {
     mp.push({campo:"Bolsa",valor:"10-030702-13041-01/"+cantBolsa+"/MPZA"});
   }
 
-  // ── MALLA ───────────────────────────────────────────────────────────────
   if (anchoMM >= 48 && anchoMM <= 60) {
     mp.push({campo:"Malla",valor:"10-030703-06863-01/"+parseFloat((piezas*0.5).toFixed(1))+"/MTS"});
   } else if (anchoMM >= 61 && anchoMM <= 249) {
@@ -87,7 +80,6 @@ function calcularMateriasPrimas(anchoMM, piezas, tipoCaja, esExportacion) {
     mp.push({campo:"Malla",valor:"10-030703-06864-01/"+piezas+"/MTS"});
   }
 
-  // ── CAJA ────────────────────────────────────────────────────────────────
   if (esChorizo) {
     mp.push({campo:"Caja",valor:"10-050602-12909-01/1/PZA"});
   } else if (piezas === 9 || piezas === 16 || piezas === 20 || piezas === 40 || piezas === 49) {
@@ -109,14 +101,15 @@ export default async function handler(req, res) {
     if (!image) return res.status(400).json({error:"No se recibio imagen"});
 
     const prompt = `Analiza este comprobante Zubex. Responde SOLO con JSON puro sin markdown:
-{"id":"C-XXXX","tipo":"nuevo","ancho_raw":7.75,"ancho_unidad":"pulgadas","largo_mts":80,"asesor":"NOMBRE COMPLETO","notas":"explicacion"}
+{"id":"C-XXXX","tipo":"nuevo","ancho_raw":7.75,"ancho_unidad":"pulgadas","largo_mts":80,"asesor":"NOMBRE COMPLETO","tipo_empaque":"Estandar","notas":"explicacion"}
 
 Reglas:
 - id: numero despues de # Solicitud (ID):
 - tipo: nuevo o modificacion
-- Si NUEVO: ancho_raw es el numero del campo Ancho sin unidad, ancho_unidad es "pulgadas" o "mm" segun como aparezca. largo_mts es el numero del campo Largo en metros.
-- Si MODIFICACION: medidas al final de la descripcion del codigo. Si el numero es menor a 30 son pulgadas, si es mayor son mm.
-- asesor: nombre completo exacto del campo Asesor`;
+- Si NUEVO: ancho_raw es el numero del campo Ancho sin unidad, ancho_unidad es "pulgadas" o "mm". largo_mts es el numero en metros.
+- Si MODIFICACION: medidas al final de la descripcion del codigo. Menor a 30 = pulgadas, mayor = mm.
+- asesor: nombre completo exacto del campo Asesor
+- tipo_empaque: valor exacto del campo "Tipo de empaque" (Estandar, Especial, etc)`;
 
     const claudeResp = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST",
@@ -142,15 +135,21 @@ Reglas:
     const anchoRaw = parseFloat(String(ex.ancho_raw).replace(/[^0-9.]/g,""));
     const anchoMM  = ex.ancho_unidad==="pulgadas" ? anchoRaw*25.4 : anchoRaw;
 
+    // Detectar exportacion: asesor de exportacion Y tipo_empaque != Estandar
     const asesoresExp = [
       "LEONARDO GABRIEL GUZMAN SILVA","LEONARDO GABRIEL GUZMÁN SILVA",
       "ALBERTO ALEJANDRO ZUNIGA GARZA","ALBERTO ALEJANDRO ZÚÑIGA GARZA"
     ];
     const asesorNorm = (ex.asesor||"").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
-    const esExportacion = asesoresExp.some(a=>{
+    const esAsesorExp = asesoresExp.some(a=>{
       const n=a.normalize("NFD").replace(/[̀-ͯ]/g,"");
       return asesorNorm.includes(n)||n.includes(asesorNorm);
     });
+    const tipoEmpaque = (ex.tipo_empaque||"").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+    const esEstandar = tipoEmpaque.includes("ESTANDAR") || tipoEmpaque.includes("ESTÁNDAR");
+
+    // Es exportacion solo si asesor es de exportacion Y empaque NO es estandar
+    const esExportacion = esAsesorExp && !esEstandar;
 
     const bd = buscarBD(anchoRaw, ex.largo_mts);
     const anchoParaMP = bd ? bd.anchoMM : anchoMM;
