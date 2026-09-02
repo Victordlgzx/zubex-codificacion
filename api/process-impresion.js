@@ -245,15 +245,13 @@ export default async function handler(req, res) {
     if (!frontImage) return res.status(400).json({ error: "No se recibio la imagen de frente" });
 
     const prompt = `Analiza este print card de Impresion Zubex (puede venir frente y reverso). Responde SOLO con JSON puro sin markdown, con esta forma exacta:
-{"material":"SD2015","ancho_mm":100,"ancho_pulgadas":null,"largo_mm":null,"largo_pulgadas":null,"primer_explicito":true,"unidades_totales_frente":8,"barniz":true,"tintas_frente":[{"tipo":"directo","nombre":"BLANCO"},{"tipo":"pantone","nombre":"485C"}],"reverso_presente":false,"tintas_reverso":[],"prioridades":[[5],[8,9],[4]]}
+{"material":"SD2015","ancho_mm":100,"ancho_pulgadas":null,"largo_mm":null,"largo_pulgadas":null,"barniz":true,"tintas_frente":[{"tipo":"primer","nombre":"PRIMER"},{"tipo":"directo","nombre":"BLANCO"},{"tipo":"pantone","nombre":"485C"}],"reverso_presente":false,"tintas_reverso":[],"prioridades":[[5],[8,9],[4]]}
 Reglas:
 - material: el codigo de sustrato tal como aparece en el campo MATERIAL (ej. Z2000, SD2015, ZOX613, CX6516, U8175).
 - ancho: usa ancho_mm si la medida viene en milimetros, o ancho_pulgadas si viene en pulgadas (deja el otro en null).
 - largo_mm/largo_pulgadas: SOLO si el material es de tipo BOLSA y el print card trae dos medidas (ancho x largo); si no, deja ambos en null.
-- primer_explicito: true si la leyenda de tintas incluye PRIMER como unidad propia; false si no aparece (aunque el material sea FUNDA). IMPORTANTE: decide esto de la MISMA forma robusta que las tintas de color — por el NOMBRE "PRIMER" escrito debajo de un recuadro, nunca por si ese recuadro se ve pintado/con color o vacio/gris (un Primer con swatch gris o poco saturado igual cuenta si su nombre aparece).
-- unidades_totales_frente: cuenta TODOS los recuadros/circulos con nombre en la seccion TINTAS del FRENTE, incluyendo PRIMER y BARNIZ ademas de los colores de diseno — cuenta por la presencia del NOMBRE debajo de cada recuadro, nunca por si se ve pintado. Este numero es un cruce de verificacion contra tintas_frente: normalmente es igual a la cantidad de elementos de tintas_frente, mas 1 (si el print card solo tiene Barniz como unidad separada, sin Primer) o mas 2 (si tiene Primer Y Barniz como unidades propias separadas).
-- barniz: true si el print card indica BARNIZ = SI.
-- tintas_frente / tintas_reverso: en la seccion TINTAS del print card cada estacion tiene un circulo/recuadro con un NOMBRE escrito debajo (ej. BLANCO, AMARILLO, 187 C, NEGRO, ORO, PRIMER, BARNIZ). IMPORTANTE: para decidir que tintas van en esta lista, basate UNICAMENTE en el nombre escrito debajo de cada recuadro — nunca en si el recuadro se ve pintado/con color o vacio/gris, esa apariencia visual no es confiable. Incluye en la lista TODOS los nombres que sean colores (Blanco, Amarillo, Negro, Oro, Plata, Cyan, Magenta, Rodhamina, o un codigo Pantone como "187 C" o "485C"). NO incluyas "Primer" ni "Barniz" en esta lista — esos son campos aparte (primer_explicito y barniz). Cada tinta es {"tipo":"directo","nombre":"BLANCO|CYAN|MAGENTA|YELLOW|NEGRO|ORO|PLATA"} para pigmentos directos, o {"tipo":"pantone","nombre":"485C"} para Pantones (usa el codigo tal como aparece en el print card, con su sufijo C o U).
+- barniz: true si el print card indica BARNIZ = SI (normalmente un checkbox/marca aparte, ej. "APLICACION BARNIZ: SI/NO", separado de la seccion TINTAS).
+- tintas_frente / tintas_reverso: enumera de UNO EN UNO todos los recuadros/circulos con un NOMBRE escrito debajo en la seccion TINTAS (ej. BLANCO, AMARILLO, 187 C, NEGRO, ORO, PRIMER) — NO te saltes ninguno, incluyendo PRIMER si aparece como su propio recuadro con ese nombre. IMPORTANTE: decide que va en la lista y de que tipo es UNICAMENTE por el NOMBRE escrito debajo de cada recuadro — nunca por si el recuadro se ve pintado/con color o vacio/gris, esa apariencia visual no es confiable (un PRIMER con swatch gris o poco saturado cuenta igual que uno "pintado" si su nombre aparece). Tipos posibles: {"tipo":"directo","nombre":"BLANCO|CYAN|MAGENTA|YELLOW|NEGRO|ORO|PLATA"} para colores directos; {"tipo":"pantone","nombre":"485C"} para codigos Pantone (usa el codigo tal como aparece, con su sufijo C o U); {"tipo":"primer","nombre":"PRIMER"} SOLO si hay un recuadro con el nombre PRIMER en la seccion TINTAS. NO incluyas BARNIZ en esta lista (ese es el campo aparte "barniz", ver arriba) y NO inventes un recuadro PRIMER que no tenga su propio nombre visible.
 - reverso_presente: true si el documento trae una seccion de reverso con su propia leyenda de tintas (no importa si no trae foto o diseno grafico, ver instrucciones). Si reverso_presente es false, tintas_reverso debe ser [].
 - prioridades: lista de hasta 3 posiciones (P1,P2,P3) tomadas de la seccion PRIORIDAD/MAQUINA del print card, en orden, leyendo el numero de MAQUINA de cada renglon (no el numero de PRIORIDAD). Cada posicion es un arreglo con los numeros de maquina de ese renglon (normalmente uno solo, a veces dos si vienen combinados como "8/9" -> [8,9]). Si no hay una prioridad en esa posicion, usa un arreglo vacio [].`;
 
@@ -295,29 +293,22 @@ Reglas:
     const kgmSustrato = anchoMM != null ? calcularKgmSustrato(ex.material, tipoHoja, anchoMM) : null;
     if (kgmSustrato == null) avisos.push(`No se encontro KGM de sustrato para "${ex.material}" en lista_de_kilos.xlsx (hoja ${tipoHoja}) — revisar (ver 4.5).`);
 
-    const numTintasFrente = (ex.tintas_frente || []).length;
+    const tintasFrenteRaw = Array.isArray(ex.tintas_frente) ? ex.tintas_frente : [];
+    const tintasReversoRaw = Array.isArray(ex.tintas_reverso) ? ex.tintas_reverso : [];
+    // Primer explicito (corregido 02-sep-2026, segunda ronda, caso MEX-286-11): ya NO se usa
+    // un booleano/conteo aparte pedido al modelo (fallaba — el modelo repetia el numero de
+    // tintas de diseno en vez de contar Primer/Barniz por separado). Ahora se pide al modelo
+    // que enumere el recuadro PRIMER como una entrada mas de tintas_frente (tipo "primer"),
+    // exactamente igual de confiable que la deteccion de colores por nombre (ver 2.5/2.9.1).
+    const primerExplicito = tintasFrenteRaw.some((t) => normalizar(t && t.tipo) === "PRIMER");
+    // Las tintas de diseno (para el conteo del campo 8/9 y la Secuencia) excluyen cualquier
+    // entrada de tipo "primer" — el Primer no es una tinta de diseno.
+    const tintasDisenoFrente = tintasFrenteRaw.filter((t) => normalizar(t && t.tipo) !== "PRIMER");
+    const tintasDisenoReverso = tintasReversoRaw.filter((t) => normalizar(t && t.tipo) !== "PRIMER");
+    const numTintasFrente = tintasDisenoFrente.length;
     const hayReverso = !!ex.reverso_presente;
-    const numTintasReverso = hayReverso ? (ex.tintas_reverso || []).length : 0;
-    const tieneCMYK = tieneJuegoCMYK(ex.tintas_frente);
-
-    // Deteccion de Primer explicito, con cruce de verificacion por conteo total de unidades
-    // (Victor, 02-sep-2026, caso MEX-286-11: el modelo de vision fallo en detectar un Primer
-    // real via primer_explicito; "cuando haya 8 unidades ... hay que considerar primer + los
-    // 6 colores + barniz"). Si el conteo total de la leyenda (unidades_totales_frente) cuadra
-    // con tintas_frente + 2 (Primer y Barniz separados) o + 1 (solo Barniz, sin Primer), ese
-    // conteo manda sobre el booleano directo del modelo; si no cuadra con ninguno de los dos
-    // casos esperados, se deja el booleano directo y se avisa para revision manual.
-    let primerExplicito = !!ex.primer_explicito;
-    const unidadesTotalesFrente = Number(ex.unidades_totales_frente);
-    if (esFunda && !Number.isNaN(unidadesTotalesFrente) && unidadesTotalesFrente > 0) {
-      if (unidadesTotalesFrente === numTintasFrente + 2) primerExplicito = true;
-      else if (unidadesTotalesFrente === numTintasFrente + 1) primerExplicito = false;
-      else {
-        avisos.push(
-          `El conteo total de unidades en TINTAS (${unidadesTotalesFrente}) no cuadra con tintas de diseno (${numTintasFrente}) + Primer/Barniz — revisar manualmente si el Primer esta bien detectado.`
-        );
-      }
-    }
+    const numTintasReverso = hayReverso ? tintasDisenoReverso.length : 0;
+    const tieneCMYK = tieneJuegoCMYK(tintasDisenoFrente);
 
     const secuencia = construirSecuencia({
       esFunda,
@@ -341,9 +332,9 @@ Reglas:
       esFunda,
       primerExplicito,
       barniz: !!ex.barniz,
-      tintasFrente: ex.tintas_frente,
+      tintasFrente: tintasDisenoFrente,
       hayReverso,
-      tintasReverso: ex.tintas_reverso,
+      tintasReverso: tintasDisenoReverso,
     });
 
     return res.status(200).json({
