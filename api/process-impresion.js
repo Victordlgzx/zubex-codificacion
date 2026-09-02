@@ -24,8 +24,10 @@ const ALIASES = {
   // E38NT: sin fila en lista_de_kilos.xlsx (ver 4.5) — no tiene alias, cae en "material no encontrado".
 };
 
-const MAQUINA_MAP = { 1: "IMP001", 4: "IMP004", 8: "IMP008", 9: "IMP009", 11: "IMP011" };
+const MAQUINA_MAP = { 4: "IMP004", 8: "IMP008", 9: "IMP009", 11: "IMP011" }; // no existe IMP001 (confirmado Victor, 02-sep-2026)
 const MAQUINAS_OBSOLETAS = [5, 10]; // dadas de baja (ver 2.7/4.8) — se ignoran si aparecen
+// Capacidad diaria por linea (metros/dia), confirmada por Victor (02-sep-2026) — usada para KGM por linea.
+const MAQUINA_CAPACIDAD_M_DIA = { 4: 30000, 8: 20000, 9: 20000, 11: 50000 };
 
 const COLORANTE_ZUBEX = {
   "Warm Red": "10-020401-04318-01",
@@ -117,15 +119,30 @@ function aMilimetros(valorMM, valorPulgadas) {
   return null;
 }
 
-function resolverPrioridad(maquinas) {
-  // maquinas: arreglo de números de máquina en ese renglón (ej. [5,8] o [11]).
-  // "no recorrer": cada prioridad se resuelve de forma independiente, nunca se
-  // corre P2->P1 ni P3->P2 aunque una quede en N/A (ver 2.7/4.8, confirmado 01-sep-2026).
-  if (!maquinas || !maquinas.length) return { codigo: "N/A", activa: false };
-  const validas = maquinas.filter((m) => !MAQUINAS_OBSOLETAS.includes(Number(m)));
-  if (!validas.length) return { codigo: "N/A", activa: false };
-  const codigos = validas.map((m) => MAQUINA_MAP[Number(m)] || `IMP0${m}`);
-  return { codigo: codigos.join(" / "), activa: true };
+function resolverLineas(prioridadesRaw) {
+  // Corregido (Victor, 02-sep-2026): se aplanan las 3 prioridades EN ORDEN, separando
+  // las combinadas (ej. "8/9" -> 8, luego 9 como maquinas independientes), se quitan
+  // las obsoletas (5 y 10) de esa lista completa, y con lo que queda se va llenando
+  // Linea P1, P2, P3 en orden — SI se recorren las prioridades cuando una es obsoleta
+  // (reemplaza la regla "no se recorre" documentada el 01-sep-2026).
+  const todas = [];
+  for (const grupo of prioridadesRaw || []) {
+    for (const m of grupo || []) todas.push(Number(m));
+  }
+  const validas = todas.filter((m) => !MAQUINAS_OBSOLETAS.includes(m));
+  const avisos = [];
+  const lineas = [0, 1, 2].map((i) => {
+    const m = validas[i];
+    if (m == null) return { codigo: "N/A", capacidad: null, activa: false };
+    const codigo = MAQUINA_MAP[m];
+    const capacidad = MAQUINA_CAPACIDAD_M_DIA[m];
+    if (!codigo) {
+      avisos.push(`Maquina ${m} no esta en el catalogo de lineas activas (IMP004/IMP008/IMP009/IMP011) — revisar manualmente.`);
+      return { codigo: `IMP0${m}`, capacidad: null, activa: true };
+    }
+    return { codigo, capacidad: capacidad != null ? capacidad : null, activa: true };
+  });
+  return { lineas, avisos };
 }
 
 function tieneJuegoCMYK(tintas) {
@@ -216,17 +233,16 @@ export default async function handler(req, res) {
     if (!frontImage) return res.status(400).json({ error: "No se recibio la imagen de frente" });
 
     const prompt = `Analiza este print card de Impresion Zubex (puede venir frente y reverso). Responde SOLO con JSON puro sin markdown, con esta forma exacta:
-{"id":"C-8827","material":"SD2015","ancho_mm":100,"ancho_pulgadas":null,"largo_mm":null,"largo_pulgadas":null,"primer_explicito":true,"barniz":true,"tintas_frente":[{"tipo":"directo","nombre":"BLANCO"},{"tipo":"pantone","nombre":"485C"}],"reverso_presente":false,"tintas_reverso":[],"prioridades":[[11],[10],[]]}
+{"material":"SD2015","ancho_mm":100,"ancho_pulgadas":null,"largo_mm":null,"largo_pulgadas":null,"primer_explicito":true,"barniz":true,"tintas_frente":[{"tipo":"directo","nombre":"BLANCO"},{"tipo":"pantone","nombre":"485C"}],"reverso_presente":false,"tintas_reverso":[],"prioridades":[[5],[8,9],[4]]}
 Reglas:
-- id: el numero formato C-XXXX si aparece en el documento o nombre de archivo; si no se puede determinar con confianza, usa null (se captura manualmente despues).
 - material: el codigo de sustrato tal como aparece en el campo MATERIAL (ej. Z2000, SD2015, ZOX613, CX6516, U8175).
 - ancho: usa ancho_mm si la medida viene en milimetros, o ancho_pulgadas si viene en pulgadas (deja el otro en null).
 - largo_mm/largo_pulgadas: SOLO si el material es de tipo BOLSA y el print card trae dos medidas (ancho x largo); si no, deja ambos en null.
 - primer_explicito: true si la leyenda de tintas incluye PRIMER como unidad propia; false si no aparece (aunque el material sea FUNDA).
 - barniz: true si el print card indica BARNIZ = SI.
-- tintas_frente / tintas_reverso: lista de tintas de DISENO de esa cara, EXCLUYENDO Primer y Barniz (esos van en los campos aparte). Cada tinta es {"tipo":"directo","nombre":"BLANCO|CYAN|MAGENTA|YELLOW|NEGRO|ORO|PLATA"} para pigmentos directos, o {"tipo":"pantone","nombre":"485C"} para Pantones (usa el codigo tal como aparece en el print card, con su sufijo C o U).
+- tintas_frente / tintas_reverso: en la seccion TINTAS del print card cada estacion tiene un circulo/recuadro con un NOMBRE escrito debajo (ej. BLANCO, AMARILLO, 187 C, NEGRO, ORO, PRIMER, BARNIZ). IMPORTANTE: para decidir que tintas van en esta lista, basate UNICAMENTE en el nombre escrito debajo de cada recuadro — nunca en si el recuadro se ve pintado/con color o vacio/gris, esa apariencia visual no es confiable. Incluye en la lista TODOS los nombres que sean colores (Blanco, Amarillo, Negro, Oro, Plata, Cyan, Magenta, Rodhamina, o un codigo Pantone como "187 C" o "485C"). NO incluyas "Primer" ni "Barniz" en esta lista — esos son campos aparte (primer_explicito y barniz). Cada tinta es {"tipo":"directo","nombre":"BLANCO|CYAN|MAGENTA|YELLOW|NEGRO|ORO|PLATA"} para pigmentos directos, o {"tipo":"pantone","nombre":"485C"} para Pantones (usa el codigo tal como aparece en el print card, con su sufijo C o U).
 - reverso_presente: true si el documento trae una seccion de reverso con su propia leyenda de tintas (no importa si no trae foto o diseno grafico, ver instrucciones). Si reverso_presente es false, tintas_reverso debe ser [].
-- prioridades: lista de hasta 3 posiciones (P1,P2,P3) tomadas de la seccion PRIORIDAD/MAQUINA del print card, en orden. Cada posicion es un arreglo con los numeros de maquina de ese renglon (normalmente uno solo, a veces dos si vienen combinados como "5/8" -> [5,8]). Si no hay una prioridad en esa posicion, usa un arreglo vacio [].`;
+- prioridades: lista de hasta 3 posiciones (P1,P2,P3) tomadas de la seccion PRIORIDAD/MAQUINA del print card, en orden, leyendo el numero de MAQUINA de cada renglon (no el numero de PRIORIDAD). Cada posicion es un arreglo con los numeros de maquina de ese renglon (normalmente uno solo, a veces dos si vienen combinados como "8/9" -> [8,9]). Si no hay una prioridad en esa posicion, usa un arreglo vacio [].`;
 
     const content = [{ type: "image", source: { type: "base64", media_type: frontMimeType || "image/jpeg", data: frontImage } }];
     if (backImage) {
@@ -251,7 +267,8 @@ Reglas:
     const ex = JSON.parse(match[0]);
 
     const avisos = [];
-    if (!ex.id) avisos.push("ID (C-XXXX) no se pudo determinar automaticamente — capturar manualmente (ver 2.2).");
+    // El ID siempre se deja vacio para captura manual del usuario (ver 2.2, confirmado
+    // 02-sep-2026: nunca se intenta adivinar aunque el print card traiga un consecutivo propio).
 
     const esFunda = clasificarMaterial(ex.material) === "FUNDA";
     const esBolsa = clasificarMaterial(ex.material) === "BOLSA";
@@ -279,7 +296,14 @@ Reglas:
     });
 
     const prioridadesRaw = Array.isArray(ex.prioridades) ? ex.prioridades : [];
-    const lineas = [0, 1, 2].map((i) => resolverPrioridad(prioridadesRaw[i] || []));
+    const { lineas, avisos: avisosLineas } = resolverLineas(prioridadesRaw);
+    avisos.push(...avisosLineas);
+    // KGM por linea = (capacidad diaria de esa linea en metros / 1000) * kgm del sustrato
+    // por cada 1,000m (formula confirmada por Victor, 02-sep-2026).
+    const kgmPorLinea = (linea) =>
+      linea.activa && linea.capacidad != null && kgmSustrato != null
+        ? Math.round((linea.capacidad / 1000) * kgmSustrato * 100) / 100
+        : null;
 
     const materiasPrimas = calcularMateriasPrimasImpresion({
       esFunda,
@@ -297,7 +321,7 @@ Reglas:
       campos: {
         departamento: "Producción",
         objetivo: "Seguimiento de solicitud comercial",
-        id: ex.id || null,
+        id: null,
         nivelProceso: "Impresión",
         aplicacionesOtrasLineas: "N/A",
         aplicacionesFrente: { primer: esFunda && !!ex.primer_explicito, tintas: true, barniz: !!ex.barniz },
@@ -305,9 +329,9 @@ Reglas:
         numTintasFrente,
         numTintasReverso,
         lineaP1: lineas[0].codigo,
-        kgmP1: lineas[0].activa ? kgmSustrato : null,
+        kgmP1: kgmPorLinea(lineas[0]),
         lineaP2: lineas[1].codigo,
-        kgmP2: lineas[1].activa ? kgmSustrato : null,
+        kgmP2: kgmPorLinea(lineas[1]),
         lineaP3: lineas[2].codigo,
         secuencia,
       },
