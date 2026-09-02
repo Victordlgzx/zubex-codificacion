@@ -25,7 +25,7 @@ const ALIASES = {
 };
 
 const MAQUINA_MAP = { 4: "IMP004", 8: "IMP008", 9: "IMP009", 11: "IMP011" }; // no existe IMP001 (confirmado Victor, 02-sep-2026)
-const MAQUINAS_OBSOLETAS = [5, 10]; // dadas de baja (ver 2.7/4.8) — se ignoran si aparecen
+const MAQUINAS_OBSOLETAS = [1, 5, 10]; // dadas de baja / no existen (ver 2.7/4.8) — se ignoran si aparecen. 1 agregado 02-sep-2026 (IMP001 no existe).
 // Capacidad diaria por linea (metros/dia), confirmada por Victor (02-sep-2026) — usada para KGM por linea.
 const MAQUINA_CAPACIDAD_M_DIA = { 4: 30000, 8: 20000, 9: 20000, 11: 50000 };
 
@@ -122,14 +122,26 @@ function aMilimetros(valorMM, valorPulgadas) {
 function resolverLineas(prioridadesRaw) {
   // Corregido (Victor, 02-sep-2026): se aplanan las 3 prioridades EN ORDEN, separando
   // las combinadas (ej. "8/9" -> 8, luego 9 como maquinas independientes), se quitan
-  // las obsoletas (5 y 10) de esa lista completa, y con lo que queda se va llenando
+  // las obsoletas (1, 5 y 10) de esa lista completa, y con lo que queda se va llenando
   // Linea P1, P2, P3 en orden — SI se recorren las prioridades cuando una es obsoleta
   // (reemplaza la regla "no se recorre" documentada el 01-sep-2026).
   const todas = [];
   for (const grupo of prioridadesRaw || []) {
     for (const m of grupo || []) todas.push(Number(m));
   }
-  const validas = todas.filter((m) => !MAQUINAS_OBSOLETAS.includes(m));
+  const sinObsoletas = todas.filter((m) => !MAQUINAS_OBSOLETAS.includes(m));
+  // Corregido (Victor, 02-sep-2026, caso MEX-286-11): una misma maquina/linea NUNCA debe
+  // repetirse en dos posiciones P1/P2/P3 (ej. si la 5 -obsoleta- y la 11 aparecen en
+  // prioridades distintas, la 11 solo debe llenar una posicion, no dos). Se deduplica
+  // manteniendo la PRIMERA aparicion de cada numero de maquina.
+  const vistos = new Set();
+  const validas = [];
+  for (const m of sinObsoletas) {
+    if (!vistos.has(m)) {
+      vistos.add(m);
+      validas.push(m);
+    }
+  }
   const avisos = [];
   const lineas = [0, 1, 2].map((i) => {
     const m = validas[i];
@@ -233,12 +245,13 @@ export default async function handler(req, res) {
     if (!frontImage) return res.status(400).json({ error: "No se recibio la imagen de frente" });
 
     const prompt = `Analiza este print card de Impresion Zubex (puede venir frente y reverso). Responde SOLO con JSON puro sin markdown, con esta forma exacta:
-{"material":"SD2015","ancho_mm":100,"ancho_pulgadas":null,"largo_mm":null,"largo_pulgadas":null,"primer_explicito":true,"barniz":true,"tintas_frente":[{"tipo":"directo","nombre":"BLANCO"},{"tipo":"pantone","nombre":"485C"}],"reverso_presente":false,"tintas_reverso":[],"prioridades":[[5],[8,9],[4]]}
+{"material":"SD2015","ancho_mm":100,"ancho_pulgadas":null,"largo_mm":null,"largo_pulgadas":null,"primer_explicito":true,"unidades_totales_frente":8,"barniz":true,"tintas_frente":[{"tipo":"directo","nombre":"BLANCO"},{"tipo":"pantone","nombre":"485C"}],"reverso_presente":false,"tintas_reverso":[],"prioridades":[[5],[8,9],[4]]}
 Reglas:
 - material: el codigo de sustrato tal como aparece en el campo MATERIAL (ej. Z2000, SD2015, ZOX613, CX6516, U8175).
 - ancho: usa ancho_mm si la medida viene en milimetros, o ancho_pulgadas si viene en pulgadas (deja el otro en null).
 - largo_mm/largo_pulgadas: SOLO si el material es de tipo BOLSA y el print card trae dos medidas (ancho x largo); si no, deja ambos en null.
-- primer_explicito: true si la leyenda de tintas incluye PRIMER como unidad propia; false si no aparece (aunque el material sea FUNDA).
+- primer_explicito: true si la leyenda de tintas incluye PRIMER como unidad propia; false si no aparece (aunque el material sea FUNDA). IMPORTANTE: decide esto de la MISMA forma robusta que las tintas de color — por el NOMBRE "PRIMER" escrito debajo de un recuadro, nunca por si ese recuadro se ve pintado/con color o vacio/gris (un Primer con swatch gris o poco saturado igual cuenta si su nombre aparece).
+- unidades_totales_frente: cuenta TODOS los recuadros/circulos con nombre en la seccion TINTAS del FRENTE, incluyendo PRIMER y BARNIZ ademas de los colores de diseno — cuenta por la presencia del NOMBRE debajo de cada recuadro, nunca por si se ve pintado. Este numero es un cruce de verificacion contra tintas_frente: normalmente es igual a la cantidad de elementos de tintas_frente, mas 1 (si el print card solo tiene Barniz como unidad separada, sin Primer) o mas 2 (si tiene Primer Y Barniz como unidades propias separadas).
 - barniz: true si el print card indica BARNIZ = SI.
 - tintas_frente / tintas_reverso: en la seccion TINTAS del print card cada estacion tiene un circulo/recuadro con un NOMBRE escrito debajo (ej. BLANCO, AMARILLO, 187 C, NEGRO, ORO, PRIMER, BARNIZ). IMPORTANTE: para decidir que tintas van en esta lista, basate UNICAMENTE en el nombre escrito debajo de cada recuadro — nunca en si el recuadro se ve pintado/con color o vacio/gris, esa apariencia visual no es confiable. Incluye en la lista TODOS los nombres que sean colores (Blanco, Amarillo, Negro, Oro, Plata, Cyan, Magenta, Rodhamina, o un codigo Pantone como "187 C" o "485C"). NO incluyas "Primer" ni "Barniz" en esta lista — esos son campos aparte (primer_explicito y barniz). Cada tinta es {"tipo":"directo","nombre":"BLANCO|CYAN|MAGENTA|YELLOW|NEGRO|ORO|PLATA"} para pigmentos directos, o {"tipo":"pantone","nombre":"485C"} para Pantones (usa el codigo tal como aparece en el print card, con su sufijo C o U).
 - reverso_presente: true si el documento trae una seccion de reverso con su propia leyenda de tintas (no importa si no trae foto o diseno grafico, ver instrucciones). Si reverso_presente es false, tintas_reverso debe ser [].
@@ -287,6 +300,25 @@ Reglas:
     const numTintasReverso = hayReverso ? (ex.tintas_reverso || []).length : 0;
     const tieneCMYK = tieneJuegoCMYK(ex.tintas_frente);
 
+    // Deteccion de Primer explicito, con cruce de verificacion por conteo total de unidades
+    // (Victor, 02-sep-2026, caso MEX-286-11: el modelo de vision fallo en detectar un Primer
+    // real via primer_explicito; "cuando haya 8 unidades ... hay que considerar primer + los
+    // 6 colores + barniz"). Si el conteo total de la leyenda (unidades_totales_frente) cuadra
+    // con tintas_frente + 2 (Primer y Barniz separados) o + 1 (solo Barniz, sin Primer), ese
+    // conteo manda sobre el booleano directo del modelo; si no cuadra con ninguno de los dos
+    // casos esperados, se deja el booleano directo y se avisa para revision manual.
+    let primerExplicito = !!ex.primer_explicito;
+    const unidadesTotalesFrente = Number(ex.unidades_totales_frente);
+    if (esFunda && !Number.isNaN(unidadesTotalesFrente) && unidadesTotalesFrente > 0) {
+      if (unidadesTotalesFrente === numTintasFrente + 2) primerExplicito = true;
+      else if (unidadesTotalesFrente === numTintasFrente + 1) primerExplicito = false;
+      else {
+        avisos.push(
+          `El conteo total de unidades en TINTAS (${unidadesTotalesFrente}) no cuadra con tintas de diseno (${numTintasFrente}) + Primer/Barniz — revisar manualmente si el Primer esta bien detectado.`
+        );
+      }
+    }
+
     const secuencia = construirSecuencia({
       esFunda,
       tieneCMYK,
@@ -307,7 +339,7 @@ Reglas:
 
     const materiasPrimas = calcularMateriasPrimasImpresion({
       esFunda,
-      primerExplicito: !!ex.primer_explicito,
+      primerExplicito,
       barniz: !!ex.barniz,
       tintasFrente: ex.tintas_frente,
       hayReverso,
@@ -324,7 +356,7 @@ Reglas:
         id: null,
         nivelProceso: "Impresión",
         aplicacionesOtrasLineas: "N/A",
-        aplicacionesFrente: { primer: esFunda && !!ex.primer_explicito, tintas: true, barniz: !!ex.barniz },
+        aplicacionesFrente: { primer: esFunda && primerExplicito, tintas: true, barniz: !!ex.barniz },
         aplicacionesReverso: hayReverso ? { primer: false, tintas: true, barniz: !!ex.barniz } : "N/A",
         numTintasFrente,
         numTintasReverso,
