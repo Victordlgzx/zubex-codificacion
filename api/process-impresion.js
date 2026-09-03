@@ -295,16 +295,28 @@ Reglas:
 
     const tintasFrenteRaw = Array.isArray(ex.tintas_frente) ? ex.tintas_frente : [];
     const tintasReversoRaw = Array.isArray(ex.tintas_reverso) ? ex.tintas_reverso : [];
-    // Primer explicito (corregido 02-sep-2026, segunda ronda, caso MEX-286-11): ya NO se usa
-    // un booleano/conteo aparte pedido al modelo (fallaba — el modelo repetia el numero de
-    // tintas de diseno en vez de contar Primer/Barniz por separado). Ahora se pide al modelo
-    // que enumere el recuadro PRIMER como una entrada mas de tintas_frente (tipo "primer"),
-    // exactamente igual de confiable que la deteccion de colores por nombre (ver 2.5/2.9.1).
-    const primerExplicito = tintasFrenteRaw.some((t) => normalizar(t && t.tipo) === "PRIMER");
+    // Primer explicito (corregido 02-sep-2026, tercera vez, mismo caso MEX-286-11): el
+    // intento anterior solo revisaba el campo "tipo" === "primer", pero el modelo a veces
+    // sigue clasificando el recuadro PRIMER con tipo "directo" aunque le ponga el NOMBRE
+    // "PRIMER" correctamente (el campo 8 salio en 7 en vez de 6 porque esa entrada se colaba
+    // como si fuera una tinta de diseno mas). Correccion: revisar el NOMBRE ("PRIMER"), no el
+    // tipo — el nombre es el dato mas literal y confiable (texto tal cual, sin que el modelo
+    // tenga que clasificar nada), igual que ya se hace para detectar cada color (ver 2.5).
+    // Se revisan nombre Y tipo por seguridad (cualquiera de los dos basta), y de paso se saca
+    // tambien cualquier "BARNIZ" que se haya colado en la lista (deberia venir aparte, pero
+    // por si acaso no se cuenta como tinta de diseno tampoco).
+    const esPrimerOBarniz = (t) => {
+      const nombre = normalizar(t && t.nombre);
+      const tipo = normalizar(t && t.tipo);
+      return nombre === "PRIMER" || tipo === "PRIMER" || nombre === "BARNIZ" || tipo === "BARNIZ";
+    };
+    const primerExplicito = tintasFrenteRaw.some(
+      (t) => normalizar(t && t.nombre) === "PRIMER" || normalizar(t && t.tipo) === "PRIMER"
+    );
     // Las tintas de diseno (para el conteo del campo 8/9 y la Secuencia) excluyen cualquier
-    // entrada de tipo "primer" — el Primer no es una tinta de diseno.
-    const tintasDisenoFrente = tintasFrenteRaw.filter((t) => normalizar(t && t.tipo) !== "PRIMER");
-    const tintasDisenoReverso = tintasReversoRaw.filter((t) => normalizar(t && t.tipo) !== "PRIMER");
+    // entrada de Primer o Barniz que se haya colado en la lista — no son tintas de diseno.
+    const tintasDisenoFrente = tintasFrenteRaw.filter((t) => !esPrimerOBarniz(t));
+    const tintasDisenoReverso = tintasReversoRaw.filter((t) => !esPrimerOBarniz(t));
     const numTintasFrente = tintasDisenoFrente.length;
     const hayReverso = !!ex.reverso_presente;
     const numTintasReverso = hayReverso ? tintasDisenoReverso.length : 0;
