@@ -76,6 +76,7 @@ const ALIAS_COLOR_EN_ES = {
   BLACK: "NEGRO", NEGRO: "BLACK",
 };
 const PALABRAS_COLOR_CONOCIDAS = Object.keys(ALIAS_COLOR_EN_ES);
+const MARCAS_PRIORIDAD = ["FLINT", "SIEGWERK", "SAYER"];
 
 function resolverColorPorCatalogo(nombreColorRaw) {
   const nombre = normalizar(nombreColorRaw);
@@ -89,12 +90,15 @@ function resolverColorPorCatalogo(nombreColorRaw) {
     if (!d.includes("TINTA")) return false;
     return palabrasBusqueda.some((w) => new RegExp(`\\b${w}\\b`).test(d));
   });
-  const mismaFamiliaQueDirectos = candidatos.filter(([, desc]) => desc.toUpperCase().includes("2039-FLINT"));
-  if (mismaFamiliaQueDirectos.length === 1) {
-    return { ok: true, codigo: mismaFamiliaQueDirectos[0][0], descripcion: mismaFamiliaQueDirectos[0][1], candidatos };
-  }
-  if (candidatos.length === 1) {
-    return { ok: true, codigo: candidatos[0][0], descripcion: candidatos[0][1], candidatos };
+  // Orden de preferencia por marca (Victor, 03-sep-2026): si hay varios codigos posibles para el
+  // mismo color, se elige automaticamente el de la primera marca que tenga alguna coincidencia,
+  // en este orden — Flint primero, si no hay Siegwerk, si no hay Sayer. Ya no se le pregunta al
+  // usuario cual elegir; si ninguna de las 3 marcas tiene el color, se deja sin resolver.
+  for (const marca of MARCAS_PRIORIDAD) {
+    const deEstaMarca = candidatos.filter(([, desc]) => desc.toUpperCase().includes(marca));
+    if (deEstaMarca.length > 0) {
+      return { ok: true, codigo: deEstaMarca[0][0], descripcion: deEstaMarca[0][1], marca, candidatos };
+    }
   }
   return { ok: false, candidatos };
 }
@@ -301,12 +305,9 @@ function procesarListaTintas(tintas, acumulador, avisos) {
         const resuelto = resolverColorPorCatalogo(nombreOriginal);
         if (resuelto.ok) {
           codigo = resuelto.codigo;
-          avisos.push(`Tinta "${nombreOriginal}" no estaba en el catalogo de colores directos confirmados — se uso "${codigo}" (${resuelto.descripcion}) por coincidir en el catalogo de materias primas. Verificar que sea el codigo correcto.`);
-        } else if (resuelto.candidatos.length > 1) {
-          avisos.push(`Tinta "${nombreOriginal}" tiene varios codigos posibles en el catalogo de materias primas (${resuelto.candidatos.map(([c]) => c).join(", ")}) — agregarla manualmente eligiendo el correcto.`);
-          continue;
+          avisos.push(`Tinta "${nombreOriginal}" no estaba en el catalogo de colores directos confirmados — se uso "${codigo}" (${resuelto.descripcion}, marca ${resuelto.marca}) por prioridad de marca (Flint > Siegwerk > Sayer). Verificar que sea el codigo correcto.`);
         } else {
-          avisos.push(`No se encontro un codigo de materia prima para la tinta "${nombreOriginal}" — agregarla manualmente a las materias primas.`);
+          avisos.push(`No se encontro un codigo de materia prima para la tinta "${nombreOriginal}" en ninguna marca conocida (Flint/Siegwerk/Sayer) — agregarla manualmente a las materias primas.`);
           continue;
         }
       }
@@ -328,11 +329,9 @@ function procesarListaTintas(tintas, acumulador, avisos) {
         const resuelto = resolverColorPorCatalogo(comp.colorant);
         if (resuelto.ok) {
           acumularTinta(acumulador, resuelto.codigo, (comp.pct / 100) * FACTOR_KGM_ESTACION);
-          avisos.push(`El colorante "${comp.colorant}" de la formula Pantone de "${nombreOriginal}" no tenia codigo Zubex confirmado — se uso "${resuelto.codigo}" (${resuelto.descripcion}) por coincidir en el catalogo de materias primas. Verificar que sea el correcto.`);
-        } else if (resuelto.candidatos.length > 1) {
-          avisos.push(`El colorante "${comp.colorant}" de la tinta "${nombreOriginal}" tiene varios codigos posibles en el catalogo (${resuelto.candidatos.map(([c]) => c).join(", ")}) — agregarla manualmente eligiendo el correcto.`);
+          avisos.push(`El colorante "${comp.colorant}" de la formula Pantone de "${nombreOriginal}" no tenia codigo Zubex confirmado — se uso "${resuelto.codigo}" (${resuelto.descripcion}, marca ${resuelto.marca}) por prioridad de marca (Flint > Siegwerk > Sayer). Verificar que sea el correcto.`);
         } else {
-          avisos.push(`La formula Pantone de la tinta "${nombreOriginal}" usa un colorante ("${comp.colorant}") sin codigo Zubex confirmado — agregarla manualmente a las materias primas.`);
+          avisos.push(`La formula Pantone de la tinta "${nombreOriginal}" usa un colorante ("${comp.colorant}") sin codigo Zubex confirmado en ninguna marca conocida (Flint/Siegwerk/Sayer) — agregarla manualmente a las materias primas.`);
         }
       }
     } else {
