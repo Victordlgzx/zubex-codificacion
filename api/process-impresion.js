@@ -498,6 +498,10 @@ Reglas:
       avisos,
     });
 
+    // Quita avisos repetidos (ej. la misma tinta sin codigo confirmado aparece igual en frente
+    // y en reverso, como "032 C" — no hace falta mostrar el mismo mensaje dos veces, 03-sep-2026).
+    const avisosUnicos = Array.from(new Set(avisos));
+
     return res.status(200).json({
       success: true,
       extracted: { ...ex, material: materialResuelto, ancho_mm: anchoMM },
@@ -520,7 +524,7 @@ Reglas:
         secuencia,
       },
       materiasPrimas,
-      avisos,
+      avisos: avisosUnicos,
     });
   } catch (e) {
     return res.status(500).json({ error: e.message });
