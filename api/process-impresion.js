@@ -62,6 +62,40 @@ function normalizar(s) {
   return (s || "").toString().trim().toUpperCase();
 }
 
+// Corregido 02-sep-2026 (print card DELIS ESPALDILLA COCIDA, material real ZOXU875 leido por
+// el modelo de vision como "ZOX875", perdiendo la "U"): un solo caracter mal leido en el codigo
+// de material tira la clasificacion FUNDA/BOLSA completa a null, y de ahi en cascada rompe el
+// Blanco (cae a BOLSA en vez de BCO SAYER/BLANCO G10) y la Secuencia (posicion Primer sale "0"
+// en vez de "P"). Se agrega una correccion por distancia de edicion 1 (una sola insercion,
+// eliminacion o sustitucion de caracter) contra el catalogo conocido de materiales — si el
+// codigo leido no hace match exacto pero esta a un solo caracter de un UNICO material conocido,
+// se usa ese material conocido (y se avisa) en vez de dejar todo sin clasificar.
+function distanciaEdicionMax1(a, b) {
+  if (a === b) return true;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < la && j < lb) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    edits++;
+    if (edits > 1) return false;
+    if (la === lb) { i++; j++; }
+    else if (la > lb) { i++; }
+    else { j++; }
+  }
+  edits += (la - i) + (lb - j);
+  return edits <= 1;
+}
+
+function corregirCodigoMaterial(materialRaw) {
+  const m = normalizar(materialRaw);
+  const catalogo = Array.from(new Set([...FUNDA_MATERIALES, ...BOLSA_MATERIALES, ...Object.keys(ALIASES)]));
+  if (catalogo.includes(m)) return { material: m, corregido: false };
+  const candidatos = catalogo.filter((c) => distanciaEdicionMax1(m, c));
+  if (candidatos.length === 1) return { material: candidatos[0], corregido: true, original: m };
+  return { material: m, corregido: false };
+}
+
 function clasificarMaterial(materialRaw) {
   const m = normalizar(materialRaw);
   if (FUNDA_MATERIALES.includes(m)) return "FUNDA";
@@ -149,8 +183,15 @@ function resolverLineas(prioridadesRaw) {
     const codigo = MAQUINA_MAP[m];
     const capacidad = MAQUINA_CAPACIDAD_M_DIA[m];
     if (!codigo) {
-      avisos.push(`Maquina ${m} no esta en el catalogo de lineas activas (IMP004/IMP008/IMP009/IMP011) — revisar manualmente.`);
-      return { codigo: `IMP0${m}`, capacidad: null, activa: true };
+      // Corregido 02-sep-2026 (print card DELIS ESPALDILLA COCIDA: el modelo de vision leyo
+      // "Maquina 46", casi seguro una confusion con la columna RODILLO -que en ese print card
+      // media 46cm en ambas prioridades- en vez de la columna MAQUINA real). Un numero de
+      // maquina fuera del universo conocido (1,4,5,8,9,10,11) casi seguro es un error de
+      // lectura, NO una linea nueva — ya NO se inventa un codigo "IMP0"+numero (eso mostraba
+      // una linea que no existe como si fuera valida). Se deja en N/A y se avisa con el
+      // numero crudo visto, para que el encargado revise el print card manualmente.
+      avisos.push(`Se leyo "Maquina ${m}" en las prioridades, pero no es una linea activa conocida (IMP004/IMP008/IMP009/IMP011) ni una maquina obsoleta conocida (1/5/10) — probable error de lectura (revisar si se confundio con la columna RODILLO). Esa posicion se dejo en N/A.`);
+      return { codigo: "N/A", capacidad: null, activa: false };
     }
     return { codigo, capacidad: capacidad != null ? capacidad : null, activa: true };
   });
@@ -253,7 +294,7 @@ Reglas:
 - barniz: true si el print card indica BARNIZ = SI (normalmente un checkbox/marca aparte, ej. "APLICACION BARNIZ: SI/NO", separado de la seccion TINTAS).
 - tintas_frente / tintas_reverso: enumera de UNO EN UNO todos los recuadros/circulos con un NOMBRE escrito debajo en la seccion TINTAS (ej. BLANCO, AMARILLO, 187 C, NEGRO, ORO, PRIMER) — NO te saltes ninguno, incluyendo PRIMER si aparece como su propio recuadro con ese nombre. IMPORTANTE: decide que va en la lista y de que tipo es UNICAMENTE por el NOMBRE escrito debajo de cada recuadro — nunca por si el recuadro se ve pintado/con color o vacio/gris, esa apariencia visual no es confiable (un PRIMER con swatch gris o poco saturado cuenta igual que uno "pintado" si su nombre aparece). Tipos posibles: {"tipo":"directo","nombre":"BLANCO|CYAN|MAGENTA|YELLOW|NEGRO|ORO|PLATA"} para colores directos; {"tipo":"pantone","nombre":"485C"} para codigos Pantone (usa el codigo tal como aparece, con su sufijo C o U); {"tipo":"primer","nombre":"PRIMER"} SOLO si hay un recuadro con el nombre PRIMER en la seccion TINTAS. NO incluyas BARNIZ en esta lista (ese es el campo aparte "barniz", ver arriba) y NO inventes un recuadro PRIMER que no tenga su propio nombre visible.
 - reverso_presente: true si el documento trae una seccion de reverso con su propia leyenda de tintas (no importa si no trae foto o diseno grafico, ver instrucciones). Si reverso_presente es false, tintas_reverso debe ser [].
-- prioridades: lista de hasta 3 posiciones (P1,P2,P3) tomadas de la seccion PRIORIDAD/MAQUINA del print card, en orden, leyendo el numero de MAQUINA de cada renglon (no el numero de PRIORIDAD). Cada posicion es un arreglo con los numeros de maquina de ese renglon (normalmente uno solo, a veces dos si vienen combinados como "8/9" -> [8,9]). Si no hay una prioridad en esa posicion, usa un arreglo vacio [].`;
+- prioridades: lista de hasta 3 posiciones (P1,P2,P3) tomadas de la seccion PRIORIDAD del print card, en orden. Esa seccion normalmente tiene 3 columnas: PRIORIDAD (1,2,3 — un simple indice de orden, IGNORALO), MAQUINA (el numero real que necesitas, ej. 4, 5, 8, 9, 10, 11) y RODILLO (una medida en centimetros, ej. "46cm" — NUNCA la confundas con el numero de maquina, aunque tambien sea un numero de 2 digitos). Lee UNICAMENTE la columna MAQUINA para armar cada posicion. Cada posicion es un arreglo con los numeros de maquina de ese renglon (normalmente uno solo, a veces dos si vienen combinados como "8/9" -> [8,9]). Si no hay una prioridad en esa posicion, usa un arreglo vacio []. Los unicos numeros de maquina validos que existen son 1, 4, 5, 8, 9, 10 y 11 — si crees ver otro numero, vuelve a mirar con cuidado cual es la columna MAQUINA y cual es RODILLO antes de responder.`;
 
     const content = [{ type: "image", source: { type: "base64", media_type: frontMimeType || "image/jpeg", data: frontImage } }];
     if (backImage) {
@@ -281,17 +322,25 @@ Reglas:
     // El ID siempre se deja vacio para captura manual del usuario (ver 2.2, confirmado
     // 02-sep-2026: nunca se intenta adivinar aunque el print card traiga un consecutivo propio).
 
-    const esFunda = clasificarMaterial(ex.material) === "FUNDA";
-    const esBolsa = clasificarMaterial(ex.material) === "BOLSA";
-    if (!esFunda && !esBolsa) avisos.push(`Material "${ex.material}" no esta en la tabla FUNDA/BOLSA (ver 2.3.1) — revisar manualmente.`);
+    // Correccion por distancia de edicion (ver 2.3.1, caso DELIS/ZOXU875, 02-sep-2026): si el
+    // material leido no hace match exacto pero esta a un solo caracter de un unico material
+    // conocido, se usa ese material corregido para toda la logica de aqui en adelante.
+    const materialCorreccion = corregirCodigoMaterial(ex.material);
+    const materialResuelto = materialCorreccion.material;
+    if (materialCorreccion.corregido) {
+      avisos.push(`Material leido como "${materialCorreccion.original}" no existe — se uso "${materialResuelto}" (un solo caracter de diferencia) — verificar contra el print card.`);
+    }
+    const esFunda = clasificarMaterial(materialResuelto) === "FUNDA";
+    const esBolsa = clasificarMaterial(materialResuelto) === "BOLSA";
+    if (!esFunda && !esBolsa) avisos.push(`Material "${materialResuelto}" no esta en la tabla FUNDA/BOLSA (ver 2.3.1) — revisar manualmente.`);
 
     // Para BOLSA con ancho x largo, se usa el ANCHO para el lookup de KGM (ver 2.8/4.6).
     const anchoMM = aMilimetros(ex.ancho_mm, ex.ancho_pulgadas);
     if (anchoMM == null) avisos.push("No se pudo determinar el ancho (mm o pulgadas) del print card.");
 
     const tipoHoja = esBolsa ? "BOLSA" : "FUNDA";
-    const kgmSustrato = anchoMM != null ? calcularKgmSustrato(ex.material, tipoHoja, anchoMM) : null;
-    if (kgmSustrato == null) avisos.push(`No se encontro KGM de sustrato para "${ex.material}" en lista_de_kilos.xlsx (hoja ${tipoHoja}) — revisar (ver 4.5).`);
+    const kgmSustrato = anchoMM != null ? calcularKgmSustrato(materialResuelto, tipoHoja, anchoMM) : null;
+    if (kgmSustrato == null) avisos.push(`No se encontro KGM de sustrato para "${materialResuelto}" en lista_de_kilos.xlsx (hoja ${tipoHoja}) — revisar (ver 4.5).`);
 
     const tintasFrenteRaw = Array.isArray(ex.tintas_frente) ? ex.tintas_frente : [];
     const tintasReversoRaw = Array.isArray(ex.tintas_reverso) ? ex.tintas_reverso : [];
@@ -351,7 +400,7 @@ Reglas:
 
     return res.status(200).json({
       success: true,
-      extracted: { ...ex, ancho_mm: anchoMM },
+      extracted: { ...ex, material: materialResuelto, ancho_mm: anchoMM },
       clasificacion: esFunda ? "FUNDA" : esBolsa ? "BOLSA" : null,
       campos: {
         departamento: "Producción",
