@@ -118,6 +118,8 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
 .mp-remove{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:6px;width:30px;height:30px;flex-shrink:0;cursor:pointer;font-size:13px;}
 .mp-remove:hover{background:#fee2e2;}
 .file-mini{margin-top:8px;font-size:11px;color:var(--muted);}
+.preview-remove-btn{position:absolute;top:6px;right:6px;background:#dc2626;color:white;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,.35);}
+.preview-remove-btn:hover{background:#b91c1c;}
 </style>
 </head>
 <body>
@@ -141,7 +143,7 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
   <div class="nav">
     <div class="nav-grp">Principal</div>
     <button class="nav-btn active" onclick="go('dashboard')" id="nb-dashboard"><i class="ti ti-home"></i>Inicio</button>
-    <button class="nav-btn" onclick="go('nueva')" id="nb-nueva"><i class="ti ti-upload"></i>Nueva solicitud</button>
+    <button class="nav-btn" onclick="iniciarNuevaSolicitud()" id="nb-nueva"><i class="ti ti-upload"></i>Nueva solicitud</button>
     <div class="nav-grp">Registro</div>
     <button class="nav-btn" onclick="go('erp')" id="nb-erp"><i class="ti ti-table"></i>Vista ERP</button>
   </div>
@@ -156,7 +158,7 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
       <span class="tb-sep">/</span>
       <span class="tb-sub" id="tb-sub">Resumen del sistema</span>
     </div>
-    <button class="btn btn-accent" onclick="go('nueva')"><i class="ti ti-upload" style="font-size:13px;"></i>Nueva solicitud</button>
+    <button class="btn btn-accent" onclick="iniciarNuevaSolicitud()"><i class="ti ti-upload" style="font-size:13px;"></i>Nueva solicitud</button>
   </div>
   <div class="content">
     <div class="toast" id="toast"></div>
@@ -171,7 +173,7 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
       <div class="ai-box">
         <div class="ai-hd"><i class="ti ti-robot" style="font-size:15px;"></i>Claude — Asistente de codificacion Zubex</div>
         <div class="ai-txt">Elige el area (Corrugado o Impresion), sube el comprobante o print card correspondiente y yo leo los datos, aplico las reglas de esa area y lleno todos los campos automaticamente — incluyendo las materias primas. Puedes editar cualquier campo antes de guardar.</div>
-        <div style="margin-top:10px;"><button class="btn btn-primary" onclick="go('nueva')"><i class="ti ti-upload" style="font-size:12px;"></i>Subir comprobante</button></div>
+        <div style="margin-top:10px;"><button class="btn btn-primary" onclick="iniciarNuevaSolicitud()"><i class="ti ti-upload" style="font-size:12px;"></i>Subir comprobante</button></div>
       </div>
       <div class="card">
         <div class="card-hd">
@@ -387,6 +389,15 @@ function setInput(id, val) {
 // ---------------------------------------------------------------
 // Selector de proceso (Corrugado / Impresion / Bolseo reservado)
 // ---------------------------------------------------------------
+// Los 3 botones "Nueva solicitud" (sidebar, topbar y dashboard) deben dejar
+// todo en blanco, no solo cambiar de pagina — si no, parecia que "no hacian nada"
+// cuando ya habia una imagen pegada o un resultado en pantalla.
+function iniciarNuevaSolicitud() {
+  resetForm();
+  resetFormImpresion();
+  go('nueva');
+}
+
 function seleccionarProceso(p) {
   procesoActual = p;
   document.getElementById('pb-corrugado').classList.toggle('active', p === 'corrugado');
@@ -535,14 +546,36 @@ function handleImpresionFile(cual, file) {
     impresionFiles[cual] = { base64: e.target.result.split(',')[1], mimeType: file.type || 'image/jpeg' };
     const wrap = document.getElementById(cual === 'frente' ? 'preview-frente-wrap' : 'preview-reverso-wrap');
     wrap.innerHTML = '';
+    const container = document.createElement('div');
+    container.style.position = 'relative';
+    container.style.display = 'inline-block';
     const img = document.createElement('img');
     img.src = e.target.result;
     img.className = 'preview-img small';
-    wrap.appendChild(img);
+    container.appendChild(img);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'preview-remove-btn';
+    removeBtn.title = 'Quitar imagen';
+    removeBtn.innerHTML = '<i class="ti ti-x"></i>';
+    removeBtn.onclick = (ev) => { ev.stopPropagation(); limpiarImpresionImagen(cual); };
+    container.appendChild(removeBtn);
+    wrap.appendChild(container);
     document.getElementById('btn-procesar-impresion').disabled = !impresionFiles.frente;
   };
   r.onerror = () => toast('No se pudo leer el archivo de ' + cual, true);
   r.readAsDataURL(file);
+}
+
+// Quitar una imagen ya pegada/seleccionada en frente o reverso, sin tener que
+// reiniciar toda la solicitud (agregado a peticion de Victor).
+function limpiarImpresionImagen(cual) {
+  impresionFiles[cual] = null;
+  const wrap = document.getElementById(cual === 'frente' ? 'preview-frente-wrap' : 'preview-reverso-wrap');
+  wrap.innerHTML = '';
+  const inputEl = document.getElementById(cual === 'frente' ? 'file-frente' : 'file-reverso');
+  if (inputEl) inputEl.value = '';
+  document.getElementById('btn-procesar-impresion').disabled = !impresionFiles.frente;
 }
 
 async function procesarImpresion() {
