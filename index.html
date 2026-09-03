@@ -69,8 +69,12 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
 .finput.mp{background:#fffbeb;border-color:#fde68a;color:#854d0e;}
 .finput.mp:focus{border-color:#f59e0b;}
 .export-badge{background:#fef3ee;border:1px solid #fed7aa;border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:8px;font-size:12px;color:#c2410c;font-weight:500;}
-.upload-zone{border:2px dashed #d1d5db;border-radius:12px;padding:2.5rem 1rem;text-align:center;cursor:pointer;background:#fafafa;}
+.upload-zone{border:2px dashed #d1d5db;border-radius:12px;padding:2.5rem 1rem;text-align:center;cursor:pointer;background:#fafafa;outline:none;}
 .upload-zone:hover{border-color:var(--blue);background:#eef2ff;}
+.paste-zone{outline:none;border-radius:10px;transition:box-shadow .15s,background .15s;cursor:text;}
+.paste-zone:focus,.paste-zone.paste-zone-active{box-shadow:0 0 0 2px var(--blue);background:#eef2ff;}
+.paste-hint{font-size:10px;color:#9ca3af;margin:2px 0 6px;font-style:italic;}
+.upload-zone.paste-zone-active,.upload-zone:focus{box-shadow:0 0 0 2px var(--blue);border-color:var(--blue);background:#eef2ff;}
 .upload-icon{font-size:36px;color:#9ca3af;margin-bottom:10px;}
 .upload-title{font-size:14px;font-weight:600;color:#374151;margin-bottom:4px;}
 .upload-sub{font-size:12px;color:#9ca3af;margin-bottom:16px;}
@@ -193,6 +197,7 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
           <div class="upload-icon"><i class="ti ti-file-upload"></i></div>
           <div class="upload-title">Arrastra el comprobante aqui o haz clic</div>
           <div class="upload-sub">Imagen JPG o PNG del comprobante Zubex</div>
+          <div class="paste-hint">o haz clic aqui y pega una imagen con Ctrl+V</div>
           <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFile(this.files[0])"/>
           <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
             <i class="ti ti-upload" style="font-size:12px;"></i>Seleccionar imagen
@@ -205,14 +210,16 @@ body{font-family:"DM Sans",sans-serif;background:#f0f2f5;min-height:100vh;displa
         <div class="card">
           <div class="section-bar"><i class="ti ti-printer" style="font-size:12px;"></i>Print card — Impresion</div>
           <div class="form-grid">
-            <div>
+            <div id="zona-frente" class="paste-zone">
               <div class="flabel">Pagina de frente <span style="color:#dc2626;">* obligatorio</span></div>
               <input type="file" id="file-frente" accept="image/*" onchange="handleImpresionFile('frente', this.files[0])"/>
+              <div class="paste-hint">o haz clic aqui y pega una imagen con Ctrl+V</div>
               <div id="preview-frente-wrap"></div>
             </div>
-            <div>
+            <div id="zona-reverso" class="paste-zone">
               <div class="flabel">Pagina de reverso (opcional)</div>
               <input type="file" id="file-reverso" accept="image/*" onchange="handleImpresionFile('reverso', this.files[0])"/>
+              <div class="paste-hint">o haz clic aqui y pega una imagen con Ctrl+V</div>
               <div id="preview-reverso-wrap"></div>
             </div>
           </div>
@@ -331,6 +338,40 @@ let curData = null;
 let procesoActual = 'corrugado';
 let impresionFiles = { frente: null, reverso: null };
 
+// ---------------------------------------------------------------
+// Pegar imagen con Ctrl+V (agregado 02-sep-2026, a peticion de Victor: permite
+// tomar una captura de pantalla -con zoom si hace falta- y pegarla directo en
+// vez de tener que guardar un archivo primero y luego seleccionarlo).
+// ---------------------------------------------------------------
+function extraerImagenDeClipboard(clipboardData) {
+  if (!clipboardData || !clipboardData.items) return null;
+  for (const item of clipboardData.items) {
+    if (item.type && item.type.indexOf('image/') === 0) {
+      return item.getAsFile();
+    }
+  }
+  return null;
+}
+
+function bindPasteZone(zoneEl, onImageFile) {
+  if (!zoneEl) return;
+  zoneEl.setAttribute('tabindex', '0');
+  zoneEl.addEventListener('click', () => {
+    document.querySelectorAll('.paste-zone-active').forEach((z) => z.classList.remove('paste-zone-active'));
+    zoneEl.classList.add('paste-zone-active');
+    zoneEl.focus();
+  });
+  zoneEl.addEventListener('paste', (e) => {
+    const file = extraerImagenDeClipboard(e.clipboardData);
+    if (file) {
+      e.preventDefault();
+      onImageFile(file);
+    } else {
+      toast('No se encontro ninguna imagen en el portapapeles', true);
+    }
+  });
+}
+
 function setInput(id, val) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -356,6 +397,11 @@ function seleccionarProceso(p) {
   document.getElementById('result-wrap').style.display = 'none';
   document.getElementById('result-wrap-impresion').style.display = 'none';
 }
+
+// Zonas de pegado (Ctrl+V) — se activan una sola vez al cargar la pagina.
+bindPasteZone(document.getElementById('upload-zone'), (file) => handleFile(file));
+bindPasteZone(document.getElementById('zona-frente'), (file) => handleImpresionFile('frente', file));
+bindPasteZone(document.getElementById('zona-reverso'), (file) => handleImpresionFile('reverso', file));
 
 // ---------------------------------------------------------------
 // CORRUGADO (sin cambios de logica respecto a la version en produccion)
