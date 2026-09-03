@@ -50,8 +50,54 @@ const CODIGO_DIRECTO = {
   "NEGRO": "10-020401-08775-01",
   "ORO": "10-020401-04328-01",
   // ⚠ "PLATA" no tiene código confirmado en el doc (no hay caso real de prueba) — se deja sin mapear
-  // a propósito; si aparece, calcularMateriasPrimasImpresion la ignora y hay que confirmar el código con Victor.
+  // a propósito; si aparece, calcularMateriasPrimasImpresion pushea un aviso (no la ignora en silencio)
+  // y hay que confirmar el código con Victor.
 };
+
+// Regla general para colores nuevos que no están en CODIGO_DIRECTO ni en COLORANTE_ZUBEX (definida
+// por Victor 03-sep-2026, caso MEX-150-37 MARLIO QUESO DE PUERCO, tinta "GREEN"): buscar en el
+// catálogo de materias primas (MP_CATALOG) una descripción que diga "TINTA" y el nombre del color
+// (en español o en inglés). Si hay una sola coincidencia dentro de la misma familia de tinta que ya
+// usan los colores directos confirmados (Cyan/Magenta/Amarillo/Negro = "2039-FLINT"), se usa esa
+// automáticamente (con aviso, para que se verifique). Si hay varias coincidencias posibles o
+// ninguna, se avisa en vez de adivinar.
+const ALIAS_COLOR_EN_ES = {
+  GREEN: "VERDE", VERDE: "GREEN",
+  RED: "ROJO", ROJO: "RED",
+  BLUE: "AZUL", AZUL: "BLUE",
+  ORANGE: "NARANJA", NARANJA: "ORANGE",
+  PURPLE: "MORADO", MORADO: "PURPLE",
+  VIOLET: "VIOLETA", VIOLETA: "VIOLET",
+  PINK: "ROSA", ROSA: "PINK",
+  BROWN: "CAFE", CAFE: "BROWN",
+  GRAY: "GRIS", GREY: "GRIS", GRIS: "GRAY",
+  YELLOW: "AMARILLO", AMARILLO: "YELLOW",
+  WHITE: "BLANCO", BLANCO: "WHITE",
+  BLACK: "NEGRO", NEGRO: "BLACK",
+};
+const PALABRAS_COLOR_CONOCIDAS = Object.keys(ALIAS_COLOR_EN_ES);
+
+function resolverColorPorCatalogo(nombreColorRaw) {
+  const nombre = normalizar(nombreColorRaw);
+  const tokens = nombre.split(/[^A-Z]+/).filter(Boolean);
+  const colorPalabra = tokens.find((t) => PALABRAS_COLOR_CONOCIDAS.includes(t));
+  if (!colorPalabra) return { ok: false, candidatos: [] };
+  const alias = ALIAS_COLOR_EN_ES[colorPalabra];
+  const palabrasBusqueda = alias ? [colorPalabra, alias] : [colorPalabra];
+  const candidatos = Object.entries(MP_CATALOG).filter(([, desc]) => {
+    const d = desc.toUpperCase();
+    if (!d.includes("TINTA")) return false;
+    return palabrasBusqueda.some((w) => new RegExp(`\\b${w}\\b`).test(d));
+  });
+  const mismaFamiliaQueDirectos = candidatos.filter(([, desc]) => desc.toUpperCase().includes("2039-FLINT"));
+  if (mismaFamiliaQueDirectos.length === 1) {
+    return { ok: true, codigo: mismaFamiliaQueDirectos[0][0], descripcion: mismaFamiliaQueDirectos[0][1], candidatos };
+  }
+  if (candidatos.length === 1) {
+    return { ok: true, codigo: candidatos[0][0], descripcion: candidatos[0][1], candidatos };
+  }
+  return { ok: false, candidatos };
+}
 
 const FACTOR_KGM_ESTACION = 0.70; // KGM por estación por cada 1,000m de referencia (ver 3.1)
 
@@ -114,7 +160,14 @@ function normalizarPantone(codigoRaw) {
 function buscarFormulaPantone(codigoRaw) {
   const key = normalizarPantone(codigoRaw);
   if (!key) return null;
-  return PANTONE_FORMULAS[key] || null;
+  if (PANTONE_FORMULAS[key]) return PANTONE_FORMULAS[key];
+  // Algunos Pantones "especiales" se guardan en el catálogo con su nombre completo en vez de
+  // solo el número (ej. la fórmula de "032" está guardada como "Red 032 U", no "032 U") — si no
+  // hay match exacto, se busca una ÚNICA llave que termine en " <numero> U/C" antes de rendirse
+  // (agregado 03-sep-2026, caso MEX-150-37 MARLIO: la tinta "032 C" se perdía en silencio).
+  const candidatos = Object.keys(PANTONE_FORMULAS).filter((k) => k.endsWith(" " + key));
+  if (candidatos.length === 1) return PANTONE_FORMULAS[candidatos[0]];
+  return null;
 }
 
 function buscarGrupoKilos(materialRaw, tipo) {
@@ -228,26 +281,67 @@ function acumularTinta(acumulador, codigo, kgm) {
   acumulador[codigo] = (acumulador[codigo] || 0) + kgm;
 }
 
-function procesarListaTintas(tintas, acumulador) {
+function procesarListaTintas(tintas, acumulador, avisos) {
+  // Corregido 03-sep-2026 (caso MEX-150-37 MARLIO QUESO DE PUERCO): cuando una tinta no se podia
+  // resolver a un codigo de materia prima (nombre "directo" sin entrada en CODIGO_DIRECTO, o
+  // formula/colorante Pantone sin codigo Zubex confirmado), simplemente desaparecia de la lista
+  // de materias primas SIN NINGUN aviso — Victor reporto que el VERDE y el 032 C de un print card
+  // no aparecian y no habia forma de saber por que. Ahora cada tinta sin resolver genera un aviso
+  // explicito con su nombre, para agregarla manualmente en vez de perderla en silencio.
   for (const t of tintas || []) {
+    const nombreOriginal = (t && t.nombre) || "(sin nombre)";
     if (t.tipo === "directo") {
       const nombre = normalizar(t.nombre);
       if (nombre === "BLANCO" || nombre === "BCO SAYER") continue; // el blanco se resuelve aparte (codigoBlanco)
-      const codigo = CODIGO_DIRECTO[nombre];
+      let codigo = CODIGO_DIRECTO[nombre];
+      if (!codigo) {
+        // Color directo nuevo (ej. "GREEN") sin código confirmado todavía — se busca en el
+        // catálogo de materias primas por "TINTA" + el nombre del color (regla de Victor,
+        // 03-sep-2026, ver resolverColorPorCatalogo).
+        const resuelto = resolverColorPorCatalogo(nombreOriginal);
+        if (resuelto.ok) {
+          codigo = resuelto.codigo;
+          avisos.push(`Tinta "${nombreOriginal}" no estaba en el catalogo de colores directos confirmados — se uso "${codigo}" (${resuelto.descripcion}) por coincidir en el catalogo de materias primas. Verificar que sea el codigo correcto.`);
+        } else if (resuelto.candidatos.length > 1) {
+          avisos.push(`Tinta "${nombreOriginal}" tiene varios codigos posibles en el catalogo de materias primas (${resuelto.candidatos.map(([c]) => c).join(", ")}) — agregarla manualmente eligiendo el correcto.`);
+          continue;
+        } else {
+          avisos.push(`No se encontro un codigo de materia prima para la tinta "${nombreOriginal}" — agregarla manualmente a las materias primas.`);
+          continue;
+        }
+      }
       acumularTinta(acumulador, codigo, FACTOR_KGM_ESTACION);
     } else if (t.tipo === "pantone") {
       const formula = buscarFormulaPantone(t.nombre);
-      if (formula) {
-        for (const comp of formula) {
-          const codigoZubex = COLORANTE_ZUBEX[comp.colorant];
-          if (codigoZubex) acumularTinta(acumulador, codigoZubex, (comp.pct / 100) * FACTOR_KGM_ESTACION);
+      if (!formula) {
+        avisos.push(`No se encontro la formula Pantone de la tinta "${nombreOriginal}" — agregarla manualmente a las materias primas.`);
+        continue;
+      }
+      for (const comp of formula) {
+        let codigoZubex = COLORANTE_ZUBEX[comp.colorant];
+        if (codigoZubex) {
+          acumularTinta(acumulador, codigoZubex, (comp.pct / 100) * FACTOR_KGM_ESTACION);
+          continue;
+        }
+        // Colorante de la formula Pantone sin código Zubex confirmado (ej. "Red 032") — mismo
+        // respaldo por catálogo que los colores directos nuevos.
+        const resuelto = resolverColorPorCatalogo(comp.colorant);
+        if (resuelto.ok) {
+          acumularTinta(acumulador, resuelto.codigo, (comp.pct / 100) * FACTOR_KGM_ESTACION);
+          avisos.push(`El colorante "${comp.colorant}" de la formula Pantone de "${nombreOriginal}" no tenia codigo Zubex confirmado — se uso "${resuelto.codigo}" (${resuelto.descripcion}) por coincidir en el catalogo de materias primas. Verificar que sea el correcto.`);
+        } else if (resuelto.candidatos.length > 1) {
+          avisos.push(`El colorante "${comp.colorant}" de la tinta "${nombreOriginal}" tiene varios codigos posibles en el catalogo (${resuelto.candidatos.map(([c]) => c).join(", ")}) — agregarla manualmente eligiendo el correcto.`);
+        } else {
+          avisos.push(`La formula Pantone de la tinta "${nombreOriginal}" usa un colorante ("${comp.colorant}") sin codigo Zubex confirmado — agregarla manualmente a las materias primas.`);
         }
       }
+    } else {
+      avisos.push(`No se reconocio el tipo de la tinta "${nombreOriginal}" — agregarla manualmente a las materias primas.`);
     }
   }
 }
 
-function calcularMateriasPrimasImpresion({ esFunda, primerExplicito, barniz, tintasFrente, hayReverso, tintasReverso }) {
+function calcularMateriasPrimasImpresion({ esFunda, primerExplicito, barniz, tintasFrente, hayReverso, tintasReverso, avisos }) {
   const acumulador = {};
 
   const blanco = codigoBlanco({ esFunda, primerExplicito });
@@ -264,8 +358,8 @@ function calcularMateriasPrimasImpresion({ esFunda, primerExplicito, barniz, tin
     if (hayReverso) acumularTinta(acumulador, "10-020401-05137-01", FACTOR_KGM_ESTACION);
   }
 
-  procesarListaTintas(tintasFrente, acumulador);
-  if (hayReverso) procesarListaTintas(tintasReverso, acumulador);
+  procesarListaTintas(tintasFrente, acumulador, avisos);
+  if (hayReverso) procesarListaTintas(tintasReverso, acumulador, avisos);
 
   return Object.entries(acumulador).map(([codigo, kgm]) => ({
     codigo,
@@ -402,6 +496,7 @@ Reglas:
       tintasFrente: tintasDisenoFrente,
       hayReverso,
       tintasReverso: tintasDisenoReverso,
+      avisos,
     });
 
     return res.status(200).json({
